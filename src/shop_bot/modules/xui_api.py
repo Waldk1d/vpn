@@ -154,12 +154,29 @@ def update_or_create_client_on_panel(api: Api, inbound_id: int, email: str, days
         new_expiry_ms = int(new_expiry_dt.timestamp() * 1000)
 
         if client_index != -1:
-            inbound_to_modify.settings.clients[client_index].reset = days_to_add
-            inbound_to_modify.settings.clients[client_index].enable = True
+            existing_client = inbound_to_modify.settings.clients[client_index]
+            existing_client.reset = days_to_add
+            existing_client.enable = True
             
-            client_uuid = inbound_to_modify.settings.clients[client_index].id
+            # Включаем Subscription для существующего клиента
+            # В 3x-ui Subscription включается через установку tgId
+            try:
+                # Пытаемся установить tgId через прямое обращение к атрибутам
+                if hasattr(existing_client, 'tgId'):
+                    if not existing_client.tgId:
+                        existing_client.tgId = email
+                # Альтернативный способ - через __dict__ если это объект
+                elif hasattr(existing_client, '__dict__'):
+                    if 'tgId' not in existing_client.__dict__ or not existing_client.__dict__.get('tgId'):
+                        existing_client.__dict__['tgId'] = email
+            except Exception as e:
+                logger.debug(f"Could not set tgId for existing client: {e}")
+            
+            client_uuid = existing_client.id
         else:
             client_uuid = str(uuid.uuid4())
+            # Создаем клиента с включенной опцией Subscription
+            # В 3x-ui для включения Subscription нужно установить tgId
             new_client = Client(
                 id=client_uuid,
                 email=email,
@@ -167,6 +184,20 @@ def update_or_create_client_on_panel(api: Api, inbound_id: int, email: str, days
                 flow="xtls-rprx-vision",
                 expiry_time=new_expiry_ms
             )
+            # Устанавливаем tgId для включения Subscription и отслеживания статуса "онлайн"
+            try:
+                # Пытаемся установить tgId через атрибут
+                if hasattr(new_client, 'tgId'):
+                    new_client.tgId = email
+                # Альтернативный способ - через __dict__
+                elif hasattr(new_client, '__dict__'):
+                    new_client.__dict__['tgId'] = email
+                # Если Client использует словарь для хранения данных
+                elif isinstance(new_client, dict):
+                    new_client['tgId'] = email
+            except Exception as e:
+                logger.debug(f"Could not set tgId for new client: {e}")
+            
             inbound_to_modify.settings.clients.append(new_client)
 
         api.inbound.update(inbound_id, inbound_to_modify)
