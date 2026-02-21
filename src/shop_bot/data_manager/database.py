@@ -78,16 +78,46 @@ def initialize_db():
                 cursor.execute("ALTER TABLE xui_hosts ADD COLUMN subscription_token TEXT")
             except sqlite3.OperationalError:
                 pass  # Поле уже существует
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS plans (
-                    plan_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    host_name TEXT NOT NULL,
-                    plan_name TEXT NOT NULL,
-                    months INTEGER NOT NULL,
-                    price REAL NOT NULL,
-                    FOREIGN KEY (host_name) REFERENCES xui_hosts (host_name)
-                )
-            ''')
+            # Проверяем, существует ли таблица plans и нужно ли её пересоздать
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='plans'")
+            table_exists = cursor.fetchone()
+            
+            if table_exists:
+                # Проверяем структуру таблицы
+                cursor.execute("PRAGMA table_info(plans)")
+                columns = cursor.fetchall()
+                host_name_not_null = any(col[1] == 'host_name' and col[3] == 1 for col in columns)
+                
+                if host_name_not_null:
+                    # Пересоздаём таблицу, сохраняя данные
+                    cursor.execute("SELECT * FROM plans")
+                    old_data = cursor.fetchall()
+                    cursor.execute("DROP TABLE plans")
+                    cursor.execute('''
+                        CREATE TABLE plans (
+                            plan_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            host_name TEXT,
+                            plan_name TEXT NOT NULL,
+                            months INTEGER NOT NULL,
+                            price REAL NOT NULL
+                        )
+                    ''')
+                    # Восстанавливаем данные
+                    for row in old_data:
+                        cursor.execute(
+                            "INSERT INTO plans (plan_id, host_name, plan_name, months, price) VALUES (?, ?, ?, ?, ?)",
+                            row
+                        )
+            else:
+                cursor.execute('''
+                    CREATE TABLE plans (
+                        plan_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        host_name TEXT,
+                        plan_name TEXT NOT NULL,
+                        months INTEGER NOT NULL,
+                        price REAL NOT NULL
+                    )
+                ''')
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS subscription_links (
                     link_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -339,7 +369,7 @@ def update_setting(key: str, value: str):
     except sqlite3.Error as e:
         logging.error(f"Failed to update setting '{key}': {e}")
 
-def create_plan(host_name: str, plan_name: str, months: int, price: float):
+def create_plan(host_name: str | None, plan_name: str, months: int, price: float):
     try:
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
@@ -348,16 +378,24 @@ def create_plan(host_name: str, plan_name: str, months: int, price: float):
                 (host_name, plan_name, months, price)
             )
             conn.commit()
-            logging.info(f"Created new plan '{plan_name}' for host '{host_name}'.")
+            if host_name:
+                logging.info(f"Created new plan '{plan_name}' for host '{host_name}'.")
+            else:
+                logging.info(f"Created new plan '{plan_name}' (without host).")
     except sqlite3.Error as e:
-        logging.error(f"Failed to create plan for host '{host_name}': {e}")
+        logging.error(f"Failed to create plan: {e}")
 
-def get_plans_for_host(host_name: str) -> list[dict]:
+def get_plans_for_host(host_name: str | None = None) -> list[dict]:
+    """Получает тарифы для хоста. Если host_name=None, возвращает все тарифы без привязки к хосту"""
     try:
         with sqlite3.connect(DB_FILE) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM plans WHERE host_name = ? ORDER BY months", (host_name,))
+            if host_name:
+                cursor.execute("SELECT * FROM plans WHERE host_name = ? ORDER BY months", (host_name,))
+            else:
+                # Получаем все тарифы без привязки к хосту (host_name IS NULL)
+                cursor.execute("SELECT * FROM plans WHERE host_name IS NULL ORDER BY months")
             plans = cursor.fetchall()
             return [dict(plan) for plan in plans]
     except sqlite3.Error as e:

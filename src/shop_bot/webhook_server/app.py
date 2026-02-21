@@ -171,6 +171,9 @@ def create_webhook_app(bot_controller_instance):
         for host in hosts:
             host['plans'] = get_plans_for_host(host['host_name'])
         
+        # Получаем тарифы без привязки к хосту
+        global_plans = get_plans_for_host(None)
+        
         # Получаем статистику по subscription ссылкам
         free_subscription_count = get_free_subscription_count()
         all_subscription_links = get_all_subscription_links()
@@ -180,6 +183,7 @@ def create_webhook_app(bot_controller_instance):
         return render_template('settings.html', 
                              settings=current_settings, 
                              hosts=hosts,
+                             global_plans=global_plans,
                              free_subscription_count=free_subscription_count,
                              total_subscription_count=len(all_subscription_links),
                              assigned_subscription_count=assigned_count,
@@ -284,13 +288,17 @@ def create_webhook_app(bot_controller_instance):
     @flask_app.route('/add-plan', methods=['POST'])
     @login_required
     def add_plan_route():
+        host_name = request.form.get('host_name', '').strip() or None
         create_plan(
-            host_name=request.form['host_name'],
+            host_name=host_name,
             plan_name=request.form['plan_name'],
             months=int(request.form['months']),
             price=float(request.form['price'])
         )
-        flash(f"Новый тариф для хоста '{request.form['host_name']}' добавлен.", 'success')
+        if host_name:
+            flash(f"Новый тариф для хоста '{host_name}' добавлен.", 'success')
+        else:
+            flash(f"Новый тариф '{request.form['plan_name']}' добавлен (без привязки к хосту).", 'success')
         return redirect(url_for('settings_page'))
 
     @flask_app.route('/delete-plan/<int:plan_id>', methods=['POST'])

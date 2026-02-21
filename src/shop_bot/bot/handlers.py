@@ -652,31 +652,19 @@ def get_user_router() -> Router:
             await callback.answer("Вы уже использовали бесплатный пробный период.", show_alert=True)
             return
 
-        hosts = get_all_hosts()
-        if not hosts:
-            await callback.message.edit_text("❌ В данный момент нет доступных серверов для создания пробного ключа.")
+        # Проверяем наличие свободных subscription ссылок вместо серверов
+        free_count = get_free_subscription_count()
+        if free_count == 0:
+            await callback.message.edit_text("❌ В данный момент нет доступных subscription ссылок для создания пробного ключа.")
             return
-            
-        if len(hosts) == 1:
-            await callback.answer()
-            await process_trial_key_creation(callback.message, hosts[0]['host_name'])
-        else:
-            await callback.answer()
-            await callback.message.edit_text(
-                "Выберите сервер, на котором хотите получить пробный ключ:",
-                reply_markup=keyboards.create_host_selection_keyboard(hosts, action="trial")
-            )
-
-    @user_router.callback_query(F.data.startswith("select_host_trial_"))
-    @registration_required
-    async def trial_host_selection_handler(callback: types.CallbackQuery):
+        
         await callback.answer()
-        host_name = callback.data[len("select_host_trial_"):]
-        await process_trial_key_creation(callback.message, host_name)
+        await process_trial_key_creation(callback.message)
 
-    async def process_trial_key_creation(message: types.Message, host_name: str):
+    async def process_trial_key_creation(message: types.Message, host_name: str = None):
         user_id = message.chat.id
-        await message.edit_text(f"Отлично! Создаю для вас бесплатный ключ на {get_setting('trial_duration_days')} дня на сервере \"{host_name}\"...")
+        days = int(get_setting('trial_duration_days'))
+        await message.edit_text(f"Отлично! Создаю для вас бесплатный ключ на {days} дня...")
 
         try:
             # Пытаемся получить свободную subscription ссылку
@@ -684,49 +672,37 @@ def get_user_router() -> Router:
             email = f"user{user_id}-key{get_next_key_number(user_id)}-trial@telegram.bot"
             days_to_add = int(get_setting("trial_duration_days"))
             
-            if free_link:
-                # Используем свободную subscription ссылку
-                subscription_url = free_link['subscription_url']
-                expiry_date = datetime.now() + timedelta(days=days_to_add)
-                fake_uuid = str(uuid.uuid4())
-                
-                new_key_id = add_new_key(
-                    user_id=user_id,
-                    host_name=host_name,
-                    xui_client_uuid=fake_uuid,
-                    key_email=email,
-                    expiry_timestamp_ms=int(expiry_date.timestamp() * 1000),
-                    subscription_url=subscription_url
-                )
-                
-                if not new_key_id:
-                    await message.edit_text("❌ Не удалось создать пробный ключ.")
-                    return
-                
-                result = {
-                    'subscription_url': subscription_url,
-                    'connection_string': subscription_url,
-                    'expiry_timestamp_ms': int(expiry_date.timestamp() * 1000),
-                    'email': email
-                }
-            else:
-                # Если нет свободных ссылок, используем старую логику
-                result = await xui_api.create_or_update_key_on_host(
-                    host_name=host_name,
-                    email=email,
-                    days_to_add=days_to_add
-                )
-                if not result:
-                    await message.edit_text("❌ Не удалось создать пробный ключ. Нет свободных subscription ссылок.")
-                    return
-
-                new_key_id = add_new_key(
-                    user_id=user_id,
-                    host_name=host_name,
-                    xui_client_uuid=result['client_uuid'],
-                    key_email=result['email'],
-                    expiry_timestamp_ms=result['expiry_timestamp_ms']
-                )
+            if not free_link:
+                await message.edit_text("❌ Не удалось создать пробный ключ. Нет свободных subscription ссылок.")
+                return
+            
+            # Используем свободную subscription ссылку
+            subscription_url = free_link['subscription_url']
+            expiry_date = datetime.now() + timedelta(days=days_to_add)
+            fake_uuid = str(uuid.uuid4())
+            
+            # Используем "default" как host_name, если не указан
+            host_name_for_key = host_name or "default"
+            
+            new_key_id = add_new_key(
+                user_id=user_id,
+                host_name=host_name_for_key,
+                xui_client_uuid=fake_uuid,
+                key_email=email,
+                expiry_timestamp_ms=int(expiry_date.timestamp() * 1000),
+                subscription_url=subscription_url
+            )
+            
+            if not new_key_id:
+                await message.edit_text("❌ Не удалось создать пробный ключ.")
+                return
+            
+            result = {
+                'subscription_url': subscription_url,
+                'connection_string': subscription_url,
+                'expiry_timestamp_ms': int(expiry_date.timestamp() * 1000),
+                'email': email
+            }
 
             set_trial_used(user_id)
             
@@ -737,7 +713,7 @@ def get_user_router() -> Router:
             await message.answer(text=final_text, reply_markup=keyboards.create_key_info_keyboard(new_key_id))
 
         except Exception as e:
-            logger.error(f"Error creating trial key for user {user_id} on host {host_name}: {e}", exc_info=True)
+            logger.error(f"Error creating trial key for user {user_id}: {e}", exc_info=True)
             await message.edit_text("❌ Произошла ошибка при создании пробного ключа.")
 
     @user_router.callback_query(F.data.startswith("show_key_"))
@@ -849,28 +825,22 @@ def get_user_router() -> Router:
     @registration_required
     async def buy_new_key_handler(callback: types.CallbackQuery):
         await callback.answer()
-        hosts = get_all_hosts()
-        if not hosts:
-            await callback.message.edit_text("❌ В данный момент нет доступных серверов для покупки.")
+        
+        # Проверяем наличие свободных subscription ссылок
+        free_count = get_free_subscription_count()
+        if free_count == 0:
+            await callback.message.edit_text("❌ В данный момент нет доступных subscription ссылок для покупки.")
+            return
+        
+        # Получаем все тарифы без привязки к хосту
+        plans = get_plans_for_host(None)
+        if not plans:
+            await callback.message.edit_text("❌ В данный момент нет доступных тарифов.")
             return
         
         await callback.message.edit_text(
-            "Выберите сервер, на котором хотите приобрести ключ:",
-            reply_markup=keyboards.create_host_selection_keyboard(hosts, action="new")
-        )
-
-    @user_router.callback_query(F.data.startswith("select_host_new_"))
-    @registration_required
-    async def select_host_for_purchase_handler(callback: types.CallbackQuery):
-        await callback.answer()
-        host_name = callback.data[len("select_host_new_"):]
-        plans = get_plans_for_host(host_name)
-        if not plans:
-            await callback.message.edit_text(f"❌ Для сервера \"{host_name}\" не настроены тарифы.")
-            return
-        await callback.message.edit_text(
             "Выберите тариф для нового ключа:", 
-            reply_markup=keyboards.create_plans_keyboard(plans, action="new", host_name=host_name)
+            reply_markup=keyboards.create_plans_keyboard(plans, action="new", host_name=None)
         )
 
     @user_router.callback_query(F.data.startswith("extend_key_"))
@@ -890,25 +860,21 @@ def get_user_router() -> Router:
             await callback.message.edit_text("❌ Ошибка: Ключ не найден или не принадлежит вам.")
             return
         
-        host_name = key_data.get('host_name')
-        if not host_name:
-            await callback.message.edit_text("❌ Ошибка: У этого ключа не указан сервер. Обратитесь в поддержку.")
-            return
-
-        plans = get_plans_for_host(host_name)
+        # Получаем все тарифы без привязки к хосту
+        plans = get_plans_for_host(None)
 
         if not plans:
             await callback.message.edit_text(
-                f"❌ Извините, для сервера \"{host_name}\" в данный момент не настроены тарифы для продления."
+                "❌ В данный момент не настроены тарифы для продления."
             )
             return
 
         await callback.message.edit_text(
-            f"Выберите тариф для продления ключа на сервере \"{host_name}\":",
+            "Выберите тариф для продления ключа:",
             reply_markup=keyboards.create_plans_keyboard(
                 plans=plans,
                 action="extend",
-                host_name=host_name,
+                host_name=None,
                 key_id=key_id
             )
         )
@@ -922,7 +888,10 @@ def get_user_router() -> Router:
         action = parts[-2]
         key_id = int(parts[-1])
         plan_id = int(parts[-3])
-        host_name = "_".join(parts[:-3])
+        host_name_part = "_".join(parts[:-3])
+        
+        # Если host_name_part == "none", значит тариф без привязки к хосту
+        host_name = None if host_name_part == "none" else host_name_part
 
         await state.update_data(
             action=action, key_id=key_id, plan_id=plan_id, host_name=host_name
@@ -1564,7 +1533,10 @@ async def process_successful_payment(bot: Bot, metadata: dict):
         price = float(metadata['price'])
         action = metadata['action']
         key_id = int(metadata['key_id'])
-        host_name = metadata['host_name']
+        host_name = metadata.get('host_name')
+        # Если host_name == "none" или пустая строка, устанавливаем None
+        if host_name == "none" or host_name == "":
+            host_name = None
         plan_id = int(metadata['plan_id'])
         customer_email = metadata.get('customer_email')
         payment_method = metadata.get('payment_method')
@@ -1582,15 +1554,18 @@ async def process_successful_payment(bot: Bot, metadata: dict):
         except TelegramBadRequest as e:
             logger.warning(f"Could not delete payment message: {e}")
 
+    host_display = host_name if host_name else "системе"
     processing_message = await bot.send_message(
         chat_id=user_id,
-        text=f"✅ Оплата получена! Обрабатываю ваш запрос на сервере \"{host_name}\"..."
+        text=f"✅ Оплата получена! Обрабатываю ваш запрос..."
     )
     try:
         email = ""
         if action == "new":
             key_number = get_next_key_number(user_id)
-            email = f"user{user_id}-key{key_number}@{host_name.replace(' ', '').lower()}.bot"
+            # Используем "default" если host_name не указан
+            host_for_email = host_name if host_name else "default"
+            email = f"user{user_id}-key{key_number}@{host_for_email.replace(' ', '').lower()}.bot"
         elif action == "extend":
             key_data = get_key_by_id(key_id)
             if not key_data or key_data['user_id'] != user_id:
@@ -1603,75 +1578,64 @@ async def process_successful_payment(bot: Bot, metadata: dict):
         # Пытаемся получить свободную subscription ссылку
         free_link = get_free_subscription_link()
         
-        if free_link:
-            # Используем свободную subscription ссылку
-            subscription_url = free_link['subscription_url']
-            expiry_date = datetime.now() + timedelta(days=days_to_add)
+        if not free_link:
+            await processing_message.edit_text("❌ Не удалось создать/обновить ключ. Нет свободных subscription ссылок.")
+            return
+        
+        # Используем свободную subscription ссылку
+        subscription_url = free_link['subscription_url']
+        expiry_date = datetime.now() + timedelta(days=days_to_add)
+        
+        # Создаем ключ с subscription ссылкой
+        if action == "new":
+            # Генерируем фиктивный UUID для совместимости
+            fake_uuid = str(uuid.uuid4())
+            host_for_key = host_name if host_name else "default"
+            new_key_id = add_new_key(user_id, host_for_key, fake_uuid, email, int(expiry_date.timestamp() * 1000), subscription_url)
             
-            # Создаем ключ с subscription ссылкой
-            if action == "new":
-                # Генерируем фиктивный UUID для совместимости
-                fake_uuid = str(uuid.uuid4())
-                key_id = add_new_key(user_id, host_name, fake_uuid, email, int(expiry_date.timestamp() * 1000), subscription_url)
+            if not new_key_id:
+                await processing_message.edit_text("❌ Не удалось создать ключ.")
+                return
+            
+            result = {
+                'subscription_url': subscription_url,
+                'connection_string': subscription_url,  # Используем subscription URL как connection string
+                'expiry_timestamp_ms': int(expiry_date.timestamp() * 1000),
+                'email': email
+            }
+            key_id = new_key_id
+        elif action == "extend":
+            # Для продления обновляем дату окончания subscription ссылки
+            key_data = get_key_by_id(key_id)
+            if key_data:
+                # Находим subscription ссылку для этого ключа
+                link_data = None
+                try:
+                    with sqlite3.connect(DB_FILE) as conn:
+                        conn.row_factory = sqlite3.Row
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT * FROM subscription_links WHERE key_id = ?", (key_id,))
+                        link_row = cursor.fetchone()
+                        if link_row:
+                            link_data = dict(link_row)
+                except:
+                    pass
                 
-                if key_id:
+                if link_data:
+                    # Обновляем дату окончания
+                    new_expiry = datetime.now() + timedelta(days=days_to_add)
+                    assign_subscription_link(link_data['subscription_url'], user_id, key_id, new_expiry)
                     result = {
-                        'subscription_url': subscription_url,
-                        'connection_string': subscription_url,  # Используем subscription URL как connection string
-                        'expiry_timestamp_ms': int(expiry_date.timestamp() * 1000),
+                        'subscription_url': link_data['subscription_url'],
+                        'connection_string': link_data['subscription_url'],
+                        'expiry_timestamp_ms': int(new_expiry.timestamp() * 1000),
                         'email': email
                     }
+                    fake_uuid = str(uuid.uuid4())
+                    update_key_info(key_id, fake_uuid, int(new_expiry.timestamp() * 1000))
                 else:
-                    await processing_message.edit_text("❌ Не удалось создать ключ.")
+                    await processing_message.edit_text("❌ Не удалось найти subscription ссылку для продления.")
                     return
-            elif action == "extend":
-                # Для продления обновляем дату окончания subscription ссылки
-                key_data = get_key_by_id(key_id)
-                if key_data:
-                    # Находим subscription ссылку для этого ключа
-                    link_data = None
-                    try:
-                        with sqlite3.connect(DB_FILE) as conn:
-                            conn.row_factory = sqlite3.Row
-                            cursor = conn.cursor()
-                            cursor.execute("SELECT * FROM subscription_links WHERE key_id = ?", (key_id,))
-                            link_row = cursor.fetchone()
-                            if link_row:
-                                link_data = dict(link_row)
-                    except:
-                        pass
-                    
-                    if link_data:
-                        # Обновляем дату окончания
-                        new_expiry = datetime.now() + timedelta(days=days_to_add)
-                        assign_subscription_link(link_data['subscription_url'], user_id, key_id, new_expiry)
-                        result = {
-                            'subscription_url': link_data['subscription_url'],
-                            'connection_string': link_data['subscription_url'],
-                            'expiry_timestamp_ms': int(new_expiry.timestamp() * 1000),
-                            'email': email
-                        }
-                        fake_uuid = str(uuid.uuid4())
-                        update_key_info(key_id, fake_uuid, int(new_expiry.timestamp() * 1000))
-                    else:
-                        await processing_message.edit_text("❌ Не удалось найти subscription ссылку для продления.")
-                        return
-        else:
-            # Если нет свободных ссылок, используем старую логику создания через API
-            result = await xui_api.create_or_update_key_on_host(
-                host_name=host_name,
-                email=email,
-                days_to_add=days_to_add
-            )
-
-            if not result:
-                await processing_message.edit_text("❌ Не удалось создать/обновить ключ в панели. Нет свободных subscription ссылок.")
-                return
-
-            if action == "new":
-                key_id = add_new_key(user_id, host_name, result['client_uuid'], result['email'], result['expiry_timestamp_ms'])
-            elif action == "extend":
-                update_key_info(key_id, result['client_uuid'], result['expiry_timestamp_ms'])
         
         price = float(metadata.get('price')) 
 

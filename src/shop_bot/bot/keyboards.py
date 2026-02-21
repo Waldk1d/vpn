@@ -83,10 +83,12 @@ def create_host_selection_keyboard(hosts: list, action: str) -> InlineKeyboardMa
     builder.adjust(1)
     return builder.as_markup()
 
-def create_plans_keyboard(plans: list[dict], action: str, host_name: str, key_id: int = 0) -> InlineKeyboardMarkup:
+def create_plans_keyboard(plans: list[dict], action: str, host_name: str | None = None, key_id: int = 0) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for plan in plans:
-        callback_data = f"buy_{host_name}_{plan['plan_id']}_{action}_{key_id}"
+        # Если host_name None, используем "none" в callback_data
+        host_part = host_name if host_name else "none"
+        callback_data = f"buy_{host_part}_{plan['plan_id']}_{action}_{key_id}"
         builder.button(text=f"{plan['plan_name']} - {plan['price']:.0f} RUB", callback_data=callback_data)
     back_callback = "manage_keys" if action == "extend" else "buy_new_key"
     builder.button(text="⬅️ Назад", callback_data=back_callback)
