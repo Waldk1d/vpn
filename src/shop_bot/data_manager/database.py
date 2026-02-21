@@ -87,6 +87,20 @@ def initialize_db():
                     price REAL NOT NULL,
                     FOREIGN KEY (host_name) REFERENCES xui_hosts (host_name)
                 )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS subscription_links (
+                    link_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    subscription_url TEXT NOT NULL UNIQUE,
+                    status TEXT NOT NULL DEFAULT 'free',
+                    user_id INTEGER,
+                    key_id INTEGER,
+                    expiry_date TIMESTAMP,
+                    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    assigned_date TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (telegram_id),
+                    FOREIGN KEY (key_id) REFERENCES vpn_keys (key_id)
+                )
             ''')            
             default_settings = {
                 "panel_login": "admin",
@@ -597,7 +611,7 @@ def set_trial_used(telegram_id: int):
     except sqlite3.Error as e:
         logging.error(f"Failed to set trial used for user {telegram_id}: {e}")
 
-def add_new_key(user_id: int, host_name: str, xui_client_uuid: str, key_email: str, expiry_timestamp_ms: int):
+def add_new_key(user_id: int, host_name: str, xui_client_uuid: str, key_email: str, expiry_timestamp_ms: int, subscription_url: str = None):
     try:
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
@@ -607,17 +621,151 @@ def add_new_key(user_id: int, host_name: str, xui_client_uuid: str, key_email: s
                 (user_id, host_name, xui_client_uuid, key_email, expiry_date)
             )
             new_key_id = cursor.lastrowid
+            
+            # Если передан subscription_url, привязываем его к ключу
+            if subscription_url:
+                cursor.execute(
+                    "UPDATE subscription_links SET status = 'assigned', user_id = ?, key_id = ?, expiry_date = ?, assigned_date = CURRENT_TIMESTAMP WHERE subscription_url = ?",
+                    (user_id, new_key_id, expiry_date, subscription_url)
+                )
+            
             conn.commit()
             return new_key_id
     except sqlite3.Error as e:
         logging.error(f"Failed to add new key for user {user_id}: {e}")
         return None
 
+# Функции для работы с subscription ссылками
+def add_subscription_link(subscription_url: str) -> bool:
+    """Добавляет новую subscription ссылку в базу данных"""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO subscription_links (subscription_url, status) VALUES (?, 'free')",
+                (subscription_url,)
+            )
+            conn.commit()
+            logging.info(f"Added subscription link: {subscription_url}")
+            return True
+    except sqlite3.IntegrityError:
+        logging.warning(f"Subscription link already exists: {subscription_url}")
+        return False
+    except sqlite3.Error as e:
+        logging.error(f"Failed to add subscription link: {e}")
+        return False
+
+def get_free_subscription_link() -> dict | None:
+    """Получает первую свободную subscription ссылку"""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM subscription_links WHERE status = 'free' ORDER BY created_date ASC LIMIT 1"
+            )
+            result = cursor.fetchone()
+            return dict(result) if result else None
+    except sqlite3.Error as e:
+        logging.error(f"Failed to get free subscription link: {e}")
+        return None
+
+def assign_subscription_link(subscription_url: str, user_id: int, key_id: int, expiry_date: datetime) -> bool:
+    """Привязывает subscription ссылку к пользователю и ключу"""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE subscription_links SET status = 'assigned', user_id = ?, key_id = ?, expiry_date = ?, assigned_date = CURRENT_TIMESTAMP WHERE subscription_url = ?",
+                (user_id, key_id, expiry_date, subscription_url)
+            )
+            conn.commit()
+            logging.info(f"Assigned subscription link {subscription_url} to user {user_id}")
+            return True
+    except sqlite3.Error as e:
+        logging.error(f"Failed to assign subscription link: {e}")
+        return False
+
+def release_subscription_link(key_id: int) -> bool:
+    """Освобождает subscription ссылку при удалении ключа"""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE subscription_links SET status = 'free', user_id = NULL, key_id = NULL, expiry_date = NULL, assigned_date = NULL WHERE key_id = ?",
+                (key_id,)
+            )
+            conn.commit()
+            logging.info(f"Released subscription link for key {key_id}")
+            return True
+    except sqlite3.Error as e:
+        logging.error(f"Failed to release subscription link: {e}")
+        return False
+
+def get_free_subscription_count() -> int:
+    """Возвращает количество свободных subscription ссылок"""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM subscription_links WHERE status = 'free'")
+            return cursor.fetchone()[0]
+    except sqlite3.Error as e:
+        logging.error(f"Failed to get free subscription count: {e}")
+        return 0
+
+def get_all_subscription_links() -> list[dict]:
+    """Возвращает все subscription ссылки"""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM subscription_links ORDER BY created_date DESC")
+            return [dict(row) for row in cursor.fetchall()]
+    except sqlite3.Error as e:
+        logging.error(f"Failed to get all subscription links: {e}")
+        return []
+
+def get_subscription_link_by_url(subscription_url: str) -> dict | None:
+    """Получает subscription ссылку по URL"""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM subscription_links WHERE subscription_url = ?", (subscription_url,))
+            result = cursor.fetchone()
+            return dict(result) if result else None
+    except sqlite3.Error as e:
+        logging.error(f"Failed to get subscription link by URL: {e}")
+        return None
+
+def get_subscription_link_by_key_id(key_id: int) -> dict | None:
+    """Получает subscription ссылку по key_id"""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM subscription_links WHERE key_id = ?", (key_id,))
+            result = cursor.fetchone()
+            return dict(result) if result else None
+    except sqlite3.Error as e:
+        logging.error(f"Failed to get subscription link by key_id: {e}")
+        return None
+
 def delete_key_by_email(email: str):
     try:
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
+            # Сначала получаем key_id для освобождения subscription ссылки
+            cursor.execute("SELECT key_id FROM vpn_keys WHERE key_email = ?", (email,))
+            key_row = cursor.fetchone()
+            key_id = key_row[0] if key_row else None
+            
             cursor.execute("DELETE FROM vpn_keys WHERE key_email = ?", (email,))
+            
+            # Освобождаем subscription ссылку, если она была привязана
+            if key_id:
+                release_subscription_link(key_id)
+            
             conn.commit()
     except sqlite3.Error as e:
         logging.error(f"Failed to delete key '{email}': {e}")
@@ -827,6 +975,25 @@ def ban_user(telegram_id: int):
     except sqlite3.Error as e:
         logging.error(f"Failed to ban user {telegram_id}: {e}")
 
+def delete_user_keys(user_id: int):
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            # Сначала получаем все key_id для освобождения subscription ссылок
+            cursor.execute("SELECT key_id FROM vpn_keys WHERE user_id = ?", (user_id,))
+            key_ids = [row[0] for row in cursor.fetchall()]
+            
+            cursor.execute("DELETE FROM vpn_keys WHERE user_id = ?", (user_id,))
+            
+            # Освобождаем все subscription ссылки
+            for key_id in key_ids:
+                if key_id:
+                    release_subscription_link(key_id)
+            
+            conn.commit()
+    except sqlite3.Error as e:
+        logging.error(f"Failed to delete keys for user {user_id}: {e}")
+
 def unban_user(telegram_id: int):
     try:
         with sqlite3.connect(DB_FILE) as conn:
@@ -840,7 +1007,17 @@ def delete_user_keys(user_id: int):
     try:
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
+            # Сначала получаем все key_id для освобождения subscription ссылок
+            cursor.execute("SELECT key_id FROM vpn_keys WHERE user_id = ?", (user_id,))
+            key_ids = [row[0] for row in cursor.fetchall()]
+            
             cursor.execute("DELETE FROM vpn_keys WHERE user_id = ?", (user_id,))
+            
+            # Освобождаем все subscription ссылки
+            for key_id in key_ids:
+                if key_id:
+                    release_subscription_link(key_id)
+            
             conn.commit()
     except sqlite3.Error as e:
         logging.error(f"Failed to delete keys for user {user_id}: {e}")

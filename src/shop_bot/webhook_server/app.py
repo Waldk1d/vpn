@@ -21,7 +21,7 @@ from shop_bot.data_manager.database import (
     get_total_keys_count, get_total_spent_sum, get_daily_stats_for_charts,
     get_recent_transactions, get_paginated_transactions, get_all_users, get_user_keys,
     ban_user, unban_user, delete_user_keys, get_setting, find_and_complete_ton_transaction,
-    update_host_subscription_token
+    update_host_subscription_token, get_free_subscription_count, get_all_subscription_links
 )
 
 _bot_controller = None
@@ -171,8 +171,20 @@ def create_webhook_app(bot_controller_instance):
         for host in hosts:
             host['plans'] = get_plans_for_host(host['host_name'])
         
+        # Получаем статистику по subscription ссылкам
+        free_subscription_count = get_free_subscription_count()
+        all_subscription_links = get_all_subscription_links()
+        assigned_count = sum(1 for link in all_subscription_links if link.get('status') == 'assigned')
+        
         common_data = get_common_template_data()
-        return render_template('settings.html', settings=current_settings, hosts=hosts, **common_data)
+        return render_template('settings.html', 
+                             settings=current_settings, 
+                             hosts=hosts,
+                             free_subscription_count=free_subscription_count,
+                             total_subscription_count=len(all_subscription_links),
+                             assigned_subscription_count=assigned_count,
+                             subscription_links=all_subscription_links,
+                             **common_data)
 
     @flask_app.route('/start-shop-bot', methods=['POST'])
     @login_required

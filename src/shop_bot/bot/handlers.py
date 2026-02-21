@@ -8,6 +8,7 @@ import hashlib
 import json
 import base64
 import asyncio
+import sqlite3
 
 from urllib.parse import urlencode
 from hmac import compare_digest
@@ -38,6 +39,8 @@ from shop_bot.data_manager.database import (
     register_user_if_not_exists, get_next_key_number, get_key_by_id,
     update_key_info, set_trial_used, set_terms_agreed, get_setting, get_all_hosts,
     get_plans_for_host, get_plan_by_id, log_transaction, get_referral_count,
+    add_subscription_link, get_free_subscription_link, assign_subscription_link,
+    get_free_subscription_count, get_subscription_link_by_url, DB_FILE,
     add_to_referral_balance, create_pending_transaction, get_all_users,
     set_referral_balance, set_referral_balance_all
 )
@@ -514,6 +517,77 @@ def get_user_router() -> Router:
         except Exception as e:
             await message.answer(f"Ошибка: {e}")
 
+    @user_router.message(Command(commands=["add_subscription"]))
+    async def add_subscription_handler(message: types.Message):
+        """Обработчик для добавления subscription ссылок от админа"""
+        admin_id = int(get_setting("admin_telegram_id"))
+        if message.from_user.id != admin_id:
+            return
+        
+        # Парсим ссылки из сообщения (может быть одна или несколько, каждая с новой строки)
+        text = message.text or message.caption or ""
+        lines = text.split('\n')[1:]  # Пропускаем команду
+        
+        added_count = 0
+        already_exists_count = 0
+        invalid_count = 0
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Проверяем, что это похоже на subscription URL
+            if not line.startswith('http') or '/LQIgchIFIj/' not in line:
+                invalid_count += 1
+                continue
+            
+            if add_subscription_link(line):
+                added_count += 1
+            else:
+                already_exists_count += 1
+        
+        free_count = get_free_subscription_count()
+        
+        response = (
+            f"📊 <b>Результат добавления subscription ссылок:</b>\n\n"
+            f"✅ Добавлено новых: {added_count}\n"
+            f"⚠️ Уже существует: {already_exists_count}\n"
+            f"❌ Неверный формат: {invalid_count}\n\n"
+            f"📦 <b>Свободных ссылок всего:</b> {free_count}"
+        )
+        
+        await message.answer(response, parse_mode='HTML')
+
+    @user_router.message(Command(commands=["subscription_stats"]))
+    async def subscription_stats_handler(message: types.Message):
+        """Показывает статистику по subscription ссылкам"""
+        admin_id = int(get_setting("admin_telegram_id"))
+        if message.from_user.id != admin_id:
+            return
+        
+        free_count = get_free_subscription_count()
+        
+        try:
+            with sqlite3.connect(DB_FILE) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM subscription_links WHERE status = 'assigned'")
+                assigned_count = cursor.fetchone()[0]
+                cursor.execute("SELECT COUNT(*) FROM subscription_links")
+                total_count = cursor.fetchone()[0]
+        except:
+            assigned_count = 0
+            total_count = free_count
+        
+        response = (
+            f"📊 <b>Статистика subscription ссылок:</b>\n\n"
+            f"📦 Всего ссылок: {total_count}\n"
+            f"✅ Свободных: {free_count}\n"
+            f"🔒 Занятых: {assigned_count}"
+        )
+        
+        await message.answer(response, parse_mode='HTML')
+
     @user_router.callback_query(F.data == "show_about")
     @registration_required
     async def about_handler(callback: types.CallbackQuery):
@@ -605,24 +679,56 @@ def get_user_router() -> Router:
         await message.edit_text(f"Отлично! Создаю для вас бесплатный ключ на {get_setting('trial_duration_days')} дня на сервере \"{host_name}\"...")
 
         try:
-            result = await xui_api.create_or_update_key_on_host(
-                host_name=host_name,
-                email=f"user{user_id}-key{get_next_key_number(user_id)}-trial@telegram.bot",
-                days_to_add=int(get_setting("trial_duration_days"))
-            )
-            if not result:
-                await message.edit_text("❌ Не удалось создать пробный ключ. Ошибка на сервере.")
-                return
+            # Пытаемся получить свободную subscription ссылку
+            free_link = get_free_subscription_link()
+            email = f"user{user_id}-key{get_next_key_number(user_id)}-trial@telegram.bot"
+            days_to_add = int(get_setting("trial_duration_days"))
+            
+            if free_link:
+                # Используем свободную subscription ссылку
+                subscription_url = free_link['subscription_url']
+                expiry_date = datetime.now() + timedelta(days=days_to_add)
+                fake_uuid = str(uuid.uuid4())
+                
+                new_key_id = add_new_key(
+                    user_id=user_id,
+                    host_name=host_name,
+                    xui_client_uuid=fake_uuid,
+                    key_email=email,
+                    expiry_timestamp_ms=int(expiry_date.timestamp() * 1000),
+                    subscription_url=subscription_url
+                )
+                
+                if not new_key_id:
+                    await message.edit_text("❌ Не удалось создать пробный ключ.")
+                    return
+                
+                result = {
+                    'subscription_url': subscription_url,
+                    'connection_string': subscription_url,
+                    'expiry_timestamp_ms': int(expiry_date.timestamp() * 1000),
+                    'email': email
+                }
+            else:
+                # Если нет свободных ссылок, используем старую логику
+                result = await xui_api.create_or_update_key_on_host(
+                    host_name=host_name,
+                    email=email,
+                    days_to_add=days_to_add
+                )
+                if not result:
+                    await message.edit_text("❌ Не удалось создать пробный ключ. Нет свободных subscription ссылок.")
+                    return
+
+                new_key_id = add_new_key(
+                    user_id=user_id,
+                    host_name=host_name,
+                    xui_client_uuid=result['client_uuid'],
+                    key_email=result['email'],
+                    expiry_timestamp_ms=result['expiry_timestamp_ms']
+                )
 
             set_trial_used(user_id)
-            
-            new_key_id = add_new_key(
-                user_id=user_id,
-                host_name=host_name,
-                xui_client_uuid=result['client_uuid'],
-                key_email=result['email'],
-                expiry_timestamp_ms=result['expiry_timestamp_ms']
-            )
             
             await message.delete()
             new_expiry_date = datetime.fromtimestamp(result['expiry_timestamp_ms'] / 1000)
@@ -645,6 +751,9 @@ def get_user_router() -> Router:
         if not key_data or key_data['user_id'] != user_id:
             await callback.message.edit_text("❌ Ошибка: ключ не найден.")
             return
+        
+        # Добавляем key_id в key_data для получения subscription ссылки
+        key_data['key_id'] = key_id_to_show
             
         try:
             details = await xui_api.get_key_details_from_host(key_data)
@@ -678,6 +787,9 @@ def get_user_router() -> Router:
         key_id = int(callback.data.split("_")[2])
         key_data = get_key_by_id(key_id)
         if not key_data or key_data['user_id'] != callback.from_user.id: return
+        
+        # Добавляем key_id в key_data для получения subscription ссылки
+        key_data['key_id'] = key_id
         
         try:
             details = await xui_api.get_key_details_from_host(key_data)
@@ -1487,20 +1599,79 @@ async def process_successful_payment(bot: Bot, metadata: dict):
             email = key_data['key_email']
         
         days_to_add = months * 30
-        result = await xui_api.create_or_update_key_on_host(
-            host_name=host_name,
-            email=email,
-            days_to_add=days_to_add
-        )
+        
+        # Пытаемся получить свободную subscription ссылку
+        free_link = get_free_subscription_link()
+        
+        if free_link:
+            # Используем свободную subscription ссылку
+            subscription_url = free_link['subscription_url']
+            expiry_date = datetime.now() + timedelta(days=days_to_add)
+            
+            # Создаем ключ с subscription ссылкой
+            if action == "new":
+                # Генерируем фиктивный UUID для совместимости
+                fake_uuid = str(uuid.uuid4())
+                key_id = add_new_key(user_id, host_name, fake_uuid, email, int(expiry_date.timestamp() * 1000), subscription_url)
+                
+                if key_id:
+                    result = {
+                        'subscription_url': subscription_url,
+                        'connection_string': subscription_url,  # Используем subscription URL как connection string
+                        'expiry_timestamp_ms': int(expiry_date.timestamp() * 1000),
+                        'email': email
+                    }
+                else:
+                    await processing_message.edit_text("❌ Не удалось создать ключ.")
+                    return
+            elif action == "extend":
+                # Для продления обновляем дату окончания subscription ссылки
+                key_data = get_key_by_id(key_id)
+                if key_data:
+                    # Находим subscription ссылку для этого ключа
+                    link_data = None
+                    try:
+                        with sqlite3.connect(DB_FILE) as conn:
+                            conn.row_factory = sqlite3.Row
+                            cursor = conn.cursor()
+                            cursor.execute("SELECT * FROM subscription_links WHERE key_id = ?", (key_id,))
+                            link_row = cursor.fetchone()
+                            if link_row:
+                                link_data = dict(link_row)
+                    except:
+                        pass
+                    
+                    if link_data:
+                        # Обновляем дату окончания
+                        new_expiry = datetime.now() + timedelta(days=days_to_add)
+                        assign_subscription_link(link_data['subscription_url'], user_id, key_id, new_expiry)
+                        result = {
+                            'subscription_url': link_data['subscription_url'],
+                            'connection_string': link_data['subscription_url'],
+                            'expiry_timestamp_ms': int(new_expiry.timestamp() * 1000),
+                            'email': email
+                        }
+                        fake_uuid = str(uuid.uuid4())
+                        update_key_info(key_id, fake_uuid, int(new_expiry.timestamp() * 1000))
+                    else:
+                        await processing_message.edit_text("❌ Не удалось найти subscription ссылку для продления.")
+                        return
+        else:
+            # Если нет свободных ссылок, используем старую логику создания через API
+            result = await xui_api.create_or_update_key_on_host(
+                host_name=host_name,
+                email=email,
+                days_to_add=days_to_add
+            )
 
-        if not result:
-            await processing_message.edit_text("❌ Не удалось создать/обновить ключ в панели.")
-            return
+            if not result:
+                await processing_message.edit_text("❌ Не удалось создать/обновить ключ в панели. Нет свободных subscription ссылок.")
+                return
 
-        if action == "new":
-            key_id = add_new_key(user_id, host_name, result['client_uuid'], result['email'], result['expiry_timestamp_ms'])
-        elif action == "extend":
-            update_key_info(key_id, result['client_uuid'], result['expiry_timestamp_ms'])
+            if action == "new":
+                key_id = add_new_key(user_id, host_name, result['client_uuid'], result['email'], result['expiry_timestamp_ms'])
+            elif action == "extend":
+                update_key_info(key_id, result['client_uuid'], result['expiry_timestamp_ms'])
         
         price = float(metadata.get('price')) 
 

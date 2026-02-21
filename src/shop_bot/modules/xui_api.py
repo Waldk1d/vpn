@@ -252,6 +252,21 @@ async def get_key_details_from_host(key_data: dict) -> dict | None:
         logger.error(f"Could not get key details: host_name is missing for key_id {key_data.get('key_id')}")
         return None
 
+    # Сначала проверяем, есть ли subscription ссылка в базе данных для этого ключа
+    key_id = key_data.get('key_id')
+    if key_id:
+        try:
+            from shop_bot.data_manager.database import get_subscription_link_by_key_id
+            link_data = get_subscription_link_by_key_id(key_id)
+            if link_data and link_data.get('subscription_url'):
+                return {
+                    "connection_string": link_data['subscription_url'],
+                    "subscription_url": link_data['subscription_url']
+                }
+        except:
+            pass
+
+    # Если subscription ссылки нет в БД, используем старую логику
     host_db_data = get_host(host_name)
     if not host_db_data:
         logger.error(f"Could not get key details: Host '{host_name}' not found in the database.")
