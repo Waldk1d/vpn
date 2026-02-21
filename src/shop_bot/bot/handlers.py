@@ -626,7 +626,8 @@ def get_user_router() -> Router:
             
             await message.delete()
             new_expiry_date = datetime.fromtimestamp(result['expiry_timestamp_ms'] / 1000)
-            final_text = get_purchase_success_text("готов", get_next_key_number(user_id) -1, new_expiry_date, result['connection_string'])
+            subscription_url = result.get('subscription_url')
+            final_text = get_purchase_success_text("готов", get_next_key_number(user_id) -1, new_expiry_date, result['connection_string'], subscription_url)
             await message.answer(text=final_text, reply_markup=keyboards.create_key_info_keyboard(new_key_id))
 
         except Exception as e:
@@ -652,13 +653,14 @@ def get_user_router() -> Router:
                 return
 
             connection_string = details['connection_string']
+            subscription_url = details.get('subscription_url')
             expiry_date = datetime.fromisoformat(key_data['expiry_date'])
             created_date = datetime.fromisoformat(key_data['created_date'])
             
             all_user_keys = get_user_keys(user_id)
             key_number = next((i + 1 for i, key in enumerate(all_user_keys) if key['key_id'] == key_id_to_show), 0)
             
-            final_text = get_key_info_text(key_number, expiry_date, created_date, connection_string)
+            final_text = get_key_info_text(key_number, expiry_date, created_date, connection_string, subscription_url)
             
             await callback.message.edit_text(
                 text=final_text,
@@ -1557,6 +1559,7 @@ async def process_successful_payment(bot: Bot, metadata: dict):
         await processing_message.delete()
         
         connection_string = result['connection_string']
+        subscription_url = result.get('subscription_url')
         new_expiry_date = datetime.fromtimestamp(result['expiry_timestamp_ms'] / 1000)
         
         all_user_keys = get_user_keys(user_id)
@@ -1566,7 +1569,8 @@ async def process_successful_payment(bot: Bot, metadata: dict):
             action="создан" if action == "new" else "продлен",
             key_number=key_number,
             expiry_date=new_expiry_date,
-            connection_string=connection_string
+            connection_string=connection_string,
+            subscription_url=subscription_url
         )
         
         await bot.send_message(

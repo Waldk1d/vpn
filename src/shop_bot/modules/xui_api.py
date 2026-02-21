@@ -3,6 +3,8 @@ from datetime import datetime, timedelta
 import logging
 from urllib.parse import urlparse
 from typing import List, Dict
+import hashlib
+import base64
 
 from py3xui import Api, Client, Inbound
 
@@ -24,6 +26,65 @@ def login_to_host(host_url: str, username: str, password: str, inbound_id: int) 
     except Exception as e:
         logger.error(f"Login or inbound retrieval failed for host '{host_url}': {e}", exc_info=True)
         return None, None
+
+def get_subscription_token(api: Api, password: str) -> str | None:
+    """Получает subscription token из настроек панели 3x-ui
+    
+    В 3x-ui subscription token обычно генерируется на основе пароля панели
+    или хранится в настройках. Пробуем несколько способов получения.
+    """
+    try:
+        # Способ 1: Пытаемся получить через API системных настроек
+        if hasattr(api, 'system'):
+            try:
+                if hasattr(api.system, 'get_settings'):
+                    settings = api.system.get_settings()
+                    if settings and hasattr(settings, 'subscription_token'):
+                        return settings.subscription_token
+            except:
+                pass
+        
+        # Способ 2: Генерируем токен из пароля панели (MD5 хеш)
+        # В некоторых версиях 3x-ui токен - это MD5 хеш пароля
+        if password:
+            md5_hash = hashlib.md5(password.encode()).hexdigest()
+            # Берем первые 11 символов (как в примере LQIgchIFIj)
+            token = md5_hash[:11]
+            return token
+        
+        return None
+    except Exception as e:
+        logger.warning(f"Could not get subscription token: {e}")
+        return None
+
+def get_subscription_url(host_url: str, inbound_id: int, client_uuid: str, email: str, api: Api = None, password: str = None) -> str:
+    """Генерирует Subscription URL для клиента в формате 3x-ui
+    
+    Формат: https://panel-url/{token}/{email}
+    Где token - это subscription token панели (обычно MD5 хеш пароля)
+    """
+    parsed_url = urlparse(host_url)
+    base_url = f"{parsed_url.scheme}://{parsed_url.netloc}".rstrip('/')
+    
+    # Пытаемся получить токен
+    token = None
+    if api and password:
+        token = get_subscription_token(api, password)
+    
+    # Если токен получен, используем формат /{token}/{email}
+    if token:
+        subscription_url = f"{base_url}/{token}/{email}"
+    else:
+        # Fallback: используем альтернативный формат
+        # В некоторых версиях может использоваться формат с base64 encoded inbound_id
+        try:
+            encoded_id = base64.b64encode(str(inbound_id).encode()).decode().rstrip('=')
+            subscription_url = f"{base_url}/{encoded_id}/{email}"
+        except:
+            # Последний fallback: используем простой формат
+            subscription_url = f"{base_url}/sub/{inbound_id}/{email}"
+    
+    return subscription_url
 
 def get_connection_string(inbound: Inbound, user_uuid: str, host_url: str, remark: str) -> str | None:
     if not inbound: return None
@@ -121,6 +182,7 @@ async def create_or_update_key_on_host(host_name: str, email: str, days_to_add: 
         return None
     
     connection_string = get_connection_string(inbound, client_uuid, host_data['host_url'], remark=host_name)
+    subscription_url = get_subscription_url(host_data['host_url'], inbound.id, client_uuid, email, api, host_data['host_pass'])
     
     logger.info(f"Successfully processed key for '{email}' on host '{host_name}'.")
     
@@ -129,6 +191,7 @@ async def create_or_update_key_on_host(host_name: str, email: str, days_to_add: 
         "email": email,
         "expiry_timestamp_ms": new_expiry_ms,
         "connection_string": connection_string,
+        "subscription_url": subscription_url,
         "host_name": host_name
     }
 
@@ -152,7 +215,12 @@ async def get_key_details_from_host(key_data: dict) -> dict | None:
     if not api or not inbound: return None
 
     connection_string = get_connection_string(inbound, key_data['xui_client_uuid'], host_db_data['host_url'], remark=host_name)
-    return {"connection_string": connection_string}
+    email = key_data.get('key_email', '')
+    subscription_url = get_subscription_url(host_db_data['host_url'], inbound.id, key_data['xui_client_uuid'], email, api, host_db_data['host_pass'])
+    return {
+        "connection_string": connection_string,
+        "subscription_url": subscription_url
+    }
 
 async def delete_client_on_host(host_name: str, client_email: str) -> bool:
     host_data = get_host(host_name)
