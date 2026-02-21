@@ -69,9 +69,15 @@ def initialize_db():
                     host_url TEXT NOT NULL,
                     host_username TEXT NOT NULL,
                     host_pass TEXT NOT NULL,
-                    host_inbound_id INTEGER NOT NULL
+                    host_inbound_id INTEGER NOT NULL,
+                    subscription_token TEXT
                 )
             ''')
+            # Добавляем поле subscription_token если его нет
+            try:
+                cursor.execute("ALTER TABLE xui_hosts ADD COLUMN subscription_token TEXT")
+            except sqlite3.OperationalError:
+                pass  # Поле уже существует
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS plans (
                     plan_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -211,18 +217,32 @@ def create_new_transactions_table(cursor: sqlite3.Cursor):
         )
     ''')
 
-def create_host(name: str, url: str, user: str, passwd: str, inbound: int):
+def create_host(name: str, url: str, user: str, passwd: str, inbound: int, subscription_token: str = None):
     try:
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO xui_hosts (host_name, host_url, host_username, host_pass, host_inbound_id) VALUES (?, ?, ?, ?, ?)",
-                (name, url, user, passwd, inbound)
+                "INSERT INTO xui_hosts (host_name, host_url, host_username, host_pass, host_inbound_id, subscription_token) VALUES (?, ?, ?, ?, ?, ?)",
+                (name, url, user, passwd, inbound, subscription_token)
             )
             conn.commit()
             logging.info(f"Successfully created a new host: {name}")
     except sqlite3.Error as e:
         logging.error(f"Error creating host '{name}': {e}")
+
+def update_host_subscription_token(host_name: str, subscription_token: str):
+    """Обновляет subscription token для хоста"""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE xui_hosts SET subscription_token = ? WHERE host_name = ?",
+                (subscription_token, host_name)
+            )
+            conn.commit()
+            logging.info(f"Successfully updated subscription token for host: {host_name}")
+    except sqlite3.Error as e:
+        logging.error(f"Error updating subscription token for host '{host_name}': {e}")
 
 def delete_host(host_name: str):
     try:

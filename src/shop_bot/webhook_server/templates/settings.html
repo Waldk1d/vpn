@@ -54,6 +54,16 @@
 							required
 						/>
 					</div>
+					<div class="form-group">
+						<label for="subscription_token">Subscription Token (например, LQIgchIFIj):</label>
+						<input
+							type="text"
+							id="subscription_token"
+							name="subscription_token"
+							placeholder="LQIgchIFIj"
+						/>
+						<small style="color: #666; font-size: 0.9em;">Токен из Subscription URL вашей панели 3x-ui</small>
+					</div>
 					<button type="submit" class="button button-primary">Добавить</button>
 				</form>
 			</div>
@@ -73,6 +83,23 @@
 					</form>
 				</div>
 				<p><strong>URL:</strong> {{ host.host_url }}</p>
+				{% if host.subscription_token %}
+				<p><strong>Subscription Token:</strong> {{ host.subscription_token }}</p>
+				{% else %}
+				<p style="color: #f44336;"><strong>⚠️ Subscription Token не задан!</strong></p>
+				{% endif %}
+				<form action="{{ url_for('update_subscription_token_route', host_name=host.host_name) }}" method="post" style="margin-bottom: 10px;">
+					<div class="form-group" style="margin-bottom: 10px;">
+						<input
+							type="text"
+							name="subscription_token"
+							placeholder="Введите Subscription Token"
+							value="{{ host.subscription_token or '' }}"
+							style="width: 200px; display: inline-block;"
+						/>
+						<button type="submit" class="button button-primary button-small">Обновить Token</button>
+					</div>
+				</form>
 				<div class="plans-section">
 					<h4>Тарифы:</h4>
 					{% if host.plans %}

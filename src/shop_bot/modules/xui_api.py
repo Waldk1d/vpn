@@ -27,14 +27,19 @@ def login_to_host(host_url: str, username: str, password: str, inbound_id: int) 
         logger.error(f"Login or inbound retrieval failed for host '{host_url}': {e}", exc_info=True)
         return None, None
 
-def get_subscription_token(api: Api, inbound: Inbound, password: str) -> str | None:
+def get_subscription_token(api: Api, inbound: Inbound, password: str, host_data: dict = None) -> str | None:
     """Получает subscription token из настроек панели 3x-ui
     
     В 3x-ui subscription token обычно хранится в настройках inbound или панели.
     Пробуем несколько способов получения.
     """
     try:
-        # Способ 1: Пытаемся получить из настроек inbound
+        # Способ 1: Используем токен из базы данных (если задан вручную)
+        if host_data and host_data.get('subscription_token'):
+            logger.debug(f"Using subscription token from database: {host_data['subscription_token']}")
+            return host_data['subscription_token']
+        
+        # Способ 2: Пытаемся получить из настроек inbound
         if inbound and hasattr(inbound, 'settings'):
             settings = inbound.settings
             # Проверяем различные возможные поля для subscription token
@@ -45,7 +50,7 @@ def get_subscription_token(api: Api, inbound: Inbound, password: str) -> str | N
             if hasattr(settings, 'sub_id') and settings.sub_id:
                 return settings.sub_id
         
-        # Способ 2: Пытаемся получить через API системных настроек
+        # Способ 3: Пытаемся получить через API системных настроек
         if hasattr(api, 'system'):
             try:
                 if hasattr(api.system, 'get_settings'):
@@ -58,34 +63,18 @@ def get_subscription_token(api: Api, inbound: Inbound, password: str) -> str | N
             except Exception as e:
                 logger.debug(f"Could not get subscription token from system settings: {e}")
         
-        # Способ 3: Пытаемся получить через API клиента (если есть метод для получения subscription URL)
-        try:
-            if hasattr(api, 'client'):
-                # Некоторые версии API могут иметь метод для получения subscription URL
-                pass
-        except:
-            pass
-        
-        # Способ 4: Генерируем токен из пароля панели (MD5 хеш)
-        # В некоторых версиях 3x-ui токен - это MD5 хеш пароля
-        if password:
-            md5_hash = hashlib.md5(password.encode()).hexdigest()
-            # Берем первые 11 символов (как в примере LQIgchIFIj)
-            token = md5_hash[:11]
-            logger.debug(f"Generated subscription token from password MD5: {token}")
-            return token
-        
-        logger.warning("Could not determine subscription token from any source")
+        logger.warning("Could not determine subscription token. Please set it manually in host settings.")
         return None
     except Exception as e:
         logger.warning(f"Could not get subscription token: {e}")
         return None
 
-def get_subscription_url(host_url: str, inbound: Inbound, email: str, api: Api = None, password: str = None) -> str:
+def get_subscription_url(host_url: str, inbound: Inbound, email: str, api: Api = None, password: str = None, host_data: dict = None, use_subscription_keyword: bool = True) -> str:
     """Генерирует Subscription URL для клиента в формате 3x-ui
     
-    Формат: https://panel-url/{token}/{email}
+    Формат: https://panel-url/{token}/{identifier}
     Где token - это subscription token панели/inbound
+    identifier - это либо "Subscription" (стандартный формат), либо email клиента
     """
     parsed_url = urlparse(host_url)
     base_url = f"{parsed_url.scheme}://{parsed_url.netloc}".rstrip('/')
@@ -93,22 +82,24 @@ def get_subscription_url(host_url: str, inbound: Inbound, email: str, api: Api =
     # Пытаемся получить токен из настроек inbound или панели
     token = None
     if api and inbound and password:
-        token = get_subscription_token(api, inbound, password)
+        token = get_subscription_token(api, inbound, password, host_data)
         logger.debug(f"Subscription token for email {email}: {token}")
     
-    # Если токен получен, используем формат /{token}/{email}
-    if token:
-        subscription_url = f"{base_url}/{token}/{email}"
-        logger.info(f"Generated subscription URL: {subscription_url}")
+    # Если токен не получен, возвращаем None (чтобы показать ошибку)
+    if not token:
+        logger.error(f"Subscription token not found for host. Please set it in host settings.")
+        return None
+    
+    # В 3x-ui в конце URL может использоваться либо "Subscription", либо email клиента
+    # По умолчанию используем "Subscription" (стандартный формат панели)
+    if use_subscription_keyword:
+        identifier = "Subscription"
     else:
-        # Fallback: используем альтернативный формат
-        # В некоторых версиях может использоваться формат с base64 encoded inbound_id
-        try:
-            encoded_id = base64.b64encode(str(inbound.id).encode()).decode().rstrip('=')
-            subscription_url = f"{base_url}/{encoded_id}/{email}"
-        except:
-            # Последний fallback: используем простой формат
-            subscription_url = f"{base_url}/sub/{inbound.id}/{email}"
+        # Используем email клиента (только часть до @, если есть)
+        identifier = email.split('@')[0] if '@' in email else email
+    
+    subscription_url = f"{base_url}/{token}/{identifier}"
+    logger.info(f"Generated subscription URL: {subscription_url}")
     
     return subscription_url
 
@@ -211,7 +202,7 @@ async def create_or_update_key_on_host(host_name: str, email: str, days_to_add: 
     inbound = api.inbound.get_by_id(inbound.id)
     
     connection_string = get_connection_string(inbound, client_uuid, host_data['host_url'], remark=host_name)
-    subscription_url = get_subscription_url(host_data['host_url'], inbound, email, api, host_data['host_pass'])
+    subscription_url = get_subscription_url(host_data['host_url'], inbound, email, api, host_data['host_pass'], host_data)
     
     logger.info(f"Successfully processed key for '{email}' on host '{host_name}'.")
     
@@ -245,7 +236,7 @@ async def get_key_details_from_host(key_data: dict) -> dict | None:
 
     connection_string = get_connection_string(inbound, key_data['xui_client_uuid'], host_db_data['host_url'], remark=host_name)
     email = key_data.get('key_email', '')
-    subscription_url = get_subscription_url(host_db_data['host_url'], inbound, email, api, host_db_data['host_pass'])
+    subscription_url = get_subscription_url(host_db_data['host_url'], inbound, email, api, host_db_data['host_pass'], host_db_data)
     return {
         "connection_string": connection_string,
         "subscription_url": subscription_url

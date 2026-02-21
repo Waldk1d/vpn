@@ -20,7 +20,8 @@ from shop_bot.data_manager.database import (
     create_host, delete_host, create_plan, delete_plan, get_user_count,
     get_total_keys_count, get_total_spent_sum, get_daily_stats_for_charts,
     get_recent_transactions, get_paginated_transactions, get_all_users, get_user_keys,
-    ban_user, unban_user, delete_user_keys, get_setting, find_and_complete_ton_transaction
+    ban_user, unban_user, delete_user_keys, get_setting, find_and_complete_ton_transaction,
+    update_host_subscription_token
 )
 
 _bot_controller = None
@@ -238,14 +239,27 @@ def create_webhook_app(bot_controller_instance):
     @flask_app.route('/add-host', methods=['POST'])
     @login_required
     def add_host_route():
+        subscription_token = request.form.get('subscription_token', '').strip() or None
         create_host(
             name=request.form['host_name'],
             url=request.form['host_url'],
             user=request.form['host_username'],
             passwd=request.form['host_pass'],
-            inbound=int(request.form['host_inbound_id'])
+            inbound=int(request.form['host_inbound_id']),
+            subscription_token=subscription_token
         )
         flash(f"Хост '{request.form['host_name']}' успешно добавлен.", 'success')
+        return redirect(url_for('settings_page'))
+    
+    @flask_app.route('/update-subscription-token/<host_name>', methods=['POST'])
+    @login_required
+    def update_subscription_token_route(host_name):
+        subscription_token = request.form.get('subscription_token', '').strip() or None
+        update_host_subscription_token(host_name, subscription_token)
+        if subscription_token:
+            flash(f"Subscription token для хоста '{host_name}' обновлен.", 'success')
+        else:
+            flash(f"Subscription token для хоста '{host_name}' удален.", 'success')
         return redirect(url_for('settings_page'))
 
     @flask_app.route('/delete-host/<host_name>', methods=['POST'])
