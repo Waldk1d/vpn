@@ -87,39 +87,47 @@ def is_valid_email(email: str) -> bool:
 async def check_channel_subscription(user_id: int, bot: Bot) -> tuple[bool, str]:
     """Проверяет подписку пользователя на канал. Возвращает (is_subscribed, error_message)"""
     channel_url = get_setting("channel_url")
+    channel_id_setting = get_setting("channel_id")  # ID канала из config.json (например, -1003881907009)
     is_subscription_forced = get_setting("force_subscription") == "true"
     
-    if not is_subscription_forced or not channel_url:
+    if not is_subscription_forced:
         return True, ""  # Подписка не требуется
     
-    try:
-        # Парсим URL канала
-        channel_id = None
+    # Используем channel_id из config.json, если он указан
+    channel_id = None
+    if channel_id_setting:
+        try:
+            # Пытаемся использовать как числовой ID
+            channel_id = int(channel_id_setting)
+        except ValueError:
+            # Если не число, используем как строку
+            channel_id = channel_id_setting
+    elif channel_url:
+        # Если channel_id не указан, парсим из URL
         if 't.me/' in channel_url:
-            # Формат: https://t.me/nnstorenews или t.me/nnstorenews
             channel_username = channel_url.split('t.me/')[-1].split('?')[0].split('/')[-1].strip()
             if channel_username:
                 channel_id = '@' + channel_username
         elif channel_url.startswith('@'):
-            # Уже в формате @channel
             channel_id = channel_url
         elif '@' in channel_url:
-            # Формат @channel
             channel_id = channel_url
-        
-        if not channel_id:
-            logger.error(f"Неверный формат URL канала: {channel_url}")
-            return False, "Ошибка конфигурации канала"
-        
+    
+    if not channel_id:
+        logger.error(f"Не указан channel_id или channel_url в настройках")
+        return False, "Ошибка конфигурации канала"
+    
+    try:
         member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
         
         if member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]:
             return True, ""
         else:
-            return False, f"Вы не подписаны на канал. Пожалуйста, подпишитесь: {channel_url}"
+            channel_link = channel_url or f"https://t.me/{channel_id}" if isinstance(channel_id, str) and channel_id.startswith('@') else ""
+            return False, f"Вы не подписаны на канал. Пожалуйста, подпишитесь: {channel_link}"
             
     except Exception as e:
-        logger.error(f"Ошибка при проверке подписки для user_id {user_id} на канал {channel_url}: {e}", exc_info=True)
+        logger.error(f"Ошибка при проверке подписки для user_id {user_id} на канал {channel_id}: {e}", exc_info=True)
         return False, "Не удалось проверить подписку. Убедитесь, что бот является администратором канала."
 
 async def show_main_menu(message: types.Message, edit_message: bool = False):
@@ -130,7 +138,11 @@ async def show_main_menu(message: types.Message, edit_message: bool = False):
     trial_available = not (user_db_data and user_db_data.get('trial_used'))
     is_admin = str(user_id) == ADMIN_ID
 
-    text = "🏠 <b>Главное меню</b>\n\nВыберите действие:"
+    text = (
+        "❄️ <b>Morozovae VPN</b>\n\n"
+        "🏠 <b>Главное меню</b>\n\n"
+        "✨ Выберите действие из меню ниже:"
+    )
     keyboard = keyboards.create_main_menu_keyboard(user_keys, trial_available, is_admin)
     
     if edit_message:

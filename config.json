@@ -4,5 +4,8 @@
   "admin_telegram_id": "1048782601",
   "cryptobot_token": "536827:AAocsA9JBavDj7FgFJfUFydEZHXsREM5zPf",
   "backup_chat_id": "-1003811623218",
+  "channel_id": "-1003881907009",
+  "channel_url": "https://t.me/morozovaevpn",
+  "force_subscription": true,
   "comment": "Заполните эти поля перед запуском бота. Username указывайте без символа @"
 }

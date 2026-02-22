@@ -202,13 +202,18 @@ def initialize_db():
             
             # Загружаем настройки из config.json и обновляем их в базе данных
             if config_data:
-                config_keys = ["telegram_bot_token", "telegram_bot_username", "admin_telegram_id", "cryptobot_token", "backup_chat_id"]
+                config_keys = ["telegram_bot_token", "telegram_bot_username", "admin_telegram_id", "cryptobot_token", "backup_chat_id", "channel_id", "channel_url", "force_subscription"]
                 for key in config_keys:
-                    if key in config_data and config_data[key]:
+                    if key in config_data and config_data[key] is not None:
                         # Убираем @ из username, если он есть
-                        if key == "telegram_bot_username" and config_data[key].startswith("@"):
+                        if key == "telegram_bot_username" and isinstance(config_data[key], str) and config_data[key].startswith("@"):
                             config_data[key] = config_data[key][1:]
-                        cursor.execute("UPDATE bot_settings SET value = ? WHERE key = ?", (config_data[key], key))
+                        # Преобразуем boolean в строку для force_subscription
+                        if key == "force_subscription":
+                            value = "true" if config_data[key] else "false"
+                        else:
+                            value = str(config_data[key]) if config_data[key] is not None else None
+                        cursor.execute("UPDATE bot_settings SET value = ? WHERE key = ?", (value, key))
                         logger.info(f"Updated {key} from config.json")
             
             conn.commit()
