@@ -84,6 +84,44 @@ def is_valid_email(email: str) -> bool:
     pattern = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
     return re.match(pattern, email) is not None
 
+async def check_channel_subscription(user_id: int, bot: Bot) -> tuple[bool, str]:
+    """Проверяет подписку пользователя на канал. Возвращает (is_subscribed, error_message)"""
+    channel_url = get_setting("channel_url")
+    is_subscription_forced = get_setting("force_subscription") == "true"
+    
+    if not is_subscription_forced or not channel_url:
+        return True, ""  # Подписка не требуется
+    
+    try:
+        # Парсим URL канала
+        channel_id = None
+        if 't.me/' in channel_url:
+            # Формат: https://t.me/nnstorenews или t.me/nnstorenews
+            channel_username = channel_url.split('t.me/')[-1].split('?')[0].split('/')[-1].strip()
+            if channel_username:
+                channel_id = '@' + channel_username
+        elif channel_url.startswith('@'):
+            # Уже в формате @channel
+            channel_id = channel_url
+        elif '@' in channel_url:
+            # Формат @channel
+            channel_id = channel_url
+        
+        if not channel_id:
+            logger.error(f"Неверный формат URL канала: {channel_url}")
+            return False, "Ошибка конфигурации канала"
+        
+        member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
+        
+        if member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]:
+            return True, ""
+        else:
+            return False, f"Вы не подписаны на канал. Пожалуйста, подпишитесь: {channel_url}"
+            
+    except Exception as e:
+        logger.error(f"Ошибка при проверке подписки для user_id {user_id} на канал {channel_url}: {e}", exc_info=True)
+        return False, "Не удалось проверить подписку. Убедитесь, что бот является администратором канала."
+
 async def show_main_menu(message: types.Message, edit_message: bool = False):
     user_id = message.chat.id
     user_db_data = get_user(user_id)
@@ -109,6 +147,40 @@ def registration_required(f):
         user_id = event.from_user.id
         user_data = get_user(user_id)
         if user_data:
+            # Проверяем подписку на канал для зарегистрированных пользователей
+            channel_url = get_setting("channel_url")
+            is_subscription_forced = get_setting("force_subscription") == "true"
+            
+            if is_subscription_forced and channel_url:
+                # Получаем bot из event или kwargs
+                bot = None
+                if hasattr(event, 'bot'):
+                    bot = event.bot
+                elif 'bot' in kwargs:
+                    bot = kwargs['bot']
+                elif isinstance(event, (types.Message, types.CallbackQuery)):
+                    bot = getattr(event, 'bot', None)
+                
+                if bot:
+                    try:
+                        is_subscribed, error_msg = await check_channel_subscription(user_id, bot)
+                        if not is_subscribed:
+                            builder = InlineKeyboardBuilder()
+                            if channel_url:
+                                builder.button(text="📢 Перейти в канал", url=channel_url)
+                            builder.button(text="✅ Я подписался", callback_data="check_subscription_and_agree")
+                            builder.adjust(1)
+                            
+                            message_text = f"❌ {error_msg}"
+                            if isinstance(event, types.CallbackQuery):
+                                await event.message.answer(message_text, reply_markup=builder.as_markup())
+                                await event.answer()
+                            elif isinstance(event, types.Message):
+                                await event.answer(message_text, reply_markup=builder.as_markup())
+                            return
+                    except Exception as e:
+                        logger.error(f"Error checking subscription in registration_required: {e}", exc_info=True)
+            
             return await f(event, *args, **kwargs)
         else:
             message_text = "Пожалуйста, для начала работы со мной, отправьте команду /start"
@@ -200,31 +272,89 @@ def get_user_router() -> Router:
         channel_url = get_setting("channel_url")
         is_subscription_forced = get_setting("force_subscription") == "true"
 
+        logger.info(f"Checking subscription for user {user_id}. Force subscription: {is_subscription_forced}, Channel URL: {channel_url}")
+
         if not is_subscription_forced or not channel_url:
+            logger.info(f"Subscription check skipped: force_subscription={is_subscription_forced}, channel_url={channel_url}")
             await process_successful_onboarding(callback, state)
             return
             
         try:
-            if '@' not in channel_url and 't.me/' not in channel_url:
-                logger.error(f"Неверный формат URL канала: {channel_url}. Пропускаем проверку подписки.")
-                await process_successful_onboarding(callback, state)
+            # Парсим URL канала
+            channel_id = None
+            if 't.me/' in channel_url:
+                # Формат: https://t.me/nnstorenews или t.me/nnstorenews
+                channel_username = channel_url.split('t.me/')[-1].split('?')[0].split('/')[-1].strip()
+                if channel_username:
+                    channel_id = '@' + channel_username
+            elif channel_url.startswith('@'):
+                # Уже в формате @channel
+                channel_id = channel_url
+            elif '@' in channel_url:
+                # Формат @channel
+                channel_id = channel_url
+            
+            if not channel_id:
+                logger.error(f"Неверный формат URL канала: {channel_url}. Не удалось извлечь username.")
+                await callback.answer("Ошибка: Неверный формат URL канала. Обратитесь к администратору.", show_alert=True)
                 return
 
-            channel_id = '@' + channel_url.split('/')[-1] if 't.me/' in channel_url else channel_url
+            logger.info(f"Checking membership for user {user_id} in channel {channel_id}")
             member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
+            logger.info(f"User {user_id} status in channel {channel_id}: {member.status}")
             
             if member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]:
+                logger.info(f"User {user_id} is subscribed to channel {channel_id}")
                 await process_successful_onboarding(callback, state)
             else:
-                await callback.answer("Вы еще не подписались на канал. Пожалуйста, подпишитесь и попробуйте снова.", show_alert=True)
+                logger.warning(f"User {user_id} is NOT subscribed to channel {channel_id}. Status: {member.status}")
+                await callback.answer("❌ Вы еще не подписались на канал. Пожалуйста, подпишитесь и попробуйте снова.", show_alert=True)
 
         except Exception as e:
-            logger.error(f"Ошибка при проверке подписки для user_id {user_id} на канал {channel_url}: {e}")
-            await callback.answer("Не удалось проверить подписку. Убедитесь, что бот является администратором канала. Попробуйте позже.", show_alert=True)
+            logger.error(f"Ошибка при проверке подписки для user_id {user_id} на канал {channel_url}: {e}", exc_info=True)
+            await callback.answer("❌ Не удалось проверить подписку. Убедитесь, что бот является администратором канала. Попробуйте позже.", show_alert=True)
 
     @user_router.message(Onboarding.waiting_for_subscription_and_agreement)
     async def onboarding_fallback_handler(message: types.Message):
         await message.answer("Пожалуйста, выполните требуемые действия и нажмите на кнопку в сообщении выше.")
+
+    async def check_channel_subscription(user_id: int, bot: Bot) -> tuple[bool, str]:
+        """Проверяет подписку пользователя на канал. Возвращает (is_subscribed, error_message)"""
+        channel_url = get_setting("channel_url")
+        is_subscription_forced = get_setting("force_subscription") == "true"
+        
+        if not is_subscription_forced or not channel_url:
+            return True, ""  # Подписка не требуется
+        
+        try:
+            # Парсим URL канала
+            channel_id = None
+            if 't.me/' in channel_url:
+                # Формат: https://t.me/nnstorenews или t.me/nnstorenews
+                channel_username = channel_url.split('t.me/')[-1].split('?')[0].split('/')[-1].strip()
+                if channel_username:
+                    channel_id = '@' + channel_username
+            elif channel_url.startswith('@'):
+                # Уже в формате @channel
+                channel_id = channel_url
+            elif '@' in channel_url:
+                # Формат @channel
+                channel_id = channel_url
+            
+            if not channel_id:
+                logger.error(f"Неверный формат URL канала: {channel_url}")
+                return False, "Ошибка конфигурации канала"
+            
+            member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
+            
+            if member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]:
+                return True, ""
+            else:
+                return False, f"Вы не подписаны на канал. Пожалуйста, подпишитесь: {channel_url}"
+                
+        except Exception as e:
+            logger.error(f"Ошибка при проверке подписки для user_id {user_id} на канал {channel_url}: {e}", exc_info=True)
+            return False, "Не удалось проверить подписку. Убедитесь, что бот является администратором канала."
 
     @user_router.message(F.text == "🏠 Главное меню")
     @registration_required

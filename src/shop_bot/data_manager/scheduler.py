@@ -237,20 +237,31 @@ async def periodic_backup_task(bot_controller: BotController):
     while True:
         try:
             # Всегда сохраняем локально
+            logger.info("Creating local backup...")
             save_backup_to_file()
+            logger.info("Local backup saved successfully")
             
-            if bot_controller.get_status().get("is_running"):
+            bot_status = bot_controller.get_status()
+            logger.info(f"Bot status: {bot_status}")
+            
+            if bot_status.get("is_running"):
                 bot = bot_controller.get_bot_instance()
+                logger.info(f"Bot instance available: {bot is not None}")
+                
                 if bot:
                     backup_chat_id = database.get_setting("backup_chat_id")
-                    if backup_chat_id and backup_chat_id.strip():
+                    logger.info(f"Backup chat ID from settings: '{backup_chat_id}' (type: {type(backup_chat_id)})")
+                    
+                    if backup_chat_id and str(backup_chat_id).strip():
+                        chat_id_clean = str(backup_chat_id).strip()
+                        logger.info(f"Attempting to send backup to chat: {chat_id_clean}")
                         try:
-                            await send_backup_to_chat(bot, backup_chat_id.strip())
-                            logger.info(f"Backup sent successfully to chat {backup_chat_id}")
+                            await send_backup_to_chat(bot, chat_id_clean)
+                            logger.info(f"✅ Backup sent successfully to chat {chat_id_clean}")
                         except Exception as e:
-                            logger.error(f"Failed to send backup to chat {backup_chat_id}: {e}", exc_info=True)
+                            logger.error(f"❌ Failed to send backup to chat {chat_id_clean}: {e}", exc_info=True)
                     else:
-                        logger.debug("Backup chat ID not configured, skipping chat send")
+                        logger.warning("⚠️ Backup chat ID not configured or empty, skipping chat send")
                 else:
                     logger.warning("Backup task: Bot instance is not available, saving locally only")
             else:
@@ -263,6 +274,7 @@ async def periodic_backup_task(bot_controller: BotController):
             except Exception as backup_error:
                 logger.error(f"Failed to save backup locally: {backup_error}")
         
+        logger.info(f"Backup task: Waiting {BACKUP_INTERVAL_SECONDS} seconds until next backup...")
         await asyncio.sleep(BACKUP_INTERVAL_SECONDS)
 
 async def periodic_subscription_check(bot_controller: BotController):
