@@ -193,6 +193,9 @@ async def sync_keys_with_panels():
 async def send_backup_to_chat(bot: Bot, chat_id: str):
     """Отправляет резервную копию в указанный чат"""
     try:
+        # Преобразуем chat_id в строку и убираем пробелы
+        chat_id = str(chat_id).strip()
+        
         backup_data = create_backup()
         if not backup_data:
             logger.error("Failed to create backup for sending")
@@ -205,14 +208,26 @@ async def send_backup_to_chat(bot: Bot, chat_id: str):
             filename=f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         )
         
-        await bot.send_document(
-            chat_id=chat_id,
-            document=backup_file,
-            caption=f"📦 Резервная копия данных\n🕐 {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
-        )
-        logger.info(f"Backup sent to chat {chat_id}")
+        # Пытаемся отправить как строку (для групповых чатов с минусом)
+        try:
+            chat_id_int = int(chat_id)
+            await bot.send_document(
+                chat_id=chat_id_int,
+                document=backup_file,
+                caption=f"📦 Резервная копия данных\n🕐 {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
+            )
+        except ValueError:
+            # Если не число, отправляем как строку
+            await bot.send_document(
+                chat_id=chat_id,
+                document=backup_file,
+                caption=f"📦 Резервная копия данных\n🕐 {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
+            )
+        
+        logger.info(f"Backup sent successfully to chat {chat_id}")
     except Exception as e:
-        logger.error(f"Error sending backup to chat: {e}", exc_info=True)
+        logger.error(f"Error sending backup to chat {chat_id}: {e}", exc_info=True)
+        raise
 
 async def periodic_backup_task(bot_controller: BotController):
     """Периодическая задача для отправки backup каждые 5 минут"""
@@ -221,30 +236,32 @@ async def periodic_backup_task(bot_controller: BotController):
     
     while True:
         try:
+            # Всегда сохраняем локально
+            save_backup_to_file()
+            
             if bot_controller.get_status().get("is_running"):
                 bot = bot_controller.get_bot_instance()
                 if bot:
                     backup_chat_id = database.get_setting("backup_chat_id")
-                    if backup_chat_id:
-                        await send_backup_to_chat(bot, backup_chat_id)
-                        # Также сохраняем локально
-                        save_backup_to_file()
+                    if backup_chat_id and backup_chat_id.strip():
+                        try:
+                            await send_backup_to_chat(bot, backup_chat_id.strip())
+                            logger.info(f"Backup sent successfully to chat {backup_chat_id}")
+                        except Exception as e:
+                            logger.error(f"Failed to send backup to chat {backup_chat_id}: {e}", exc_info=True)
                     else:
-                        # Сохраняем только локально, если chat_id не указан
-                        save_backup_to_file()
+                        logger.debug("Backup chat ID not configured, skipping chat send")
                 else:
                     logger.warning("Backup task: Bot instance is not available, saving locally only")
-                    save_backup_to_file()
             else:
                 logger.info("Backup task: Bot is stopped, saving locally only")
-                save_backup_to_file()
         except Exception as e:
             logger.error(f"Backup task: An error occurred: {e}", exc_info=True)
             # Пытаемся сохранить локально даже при ошибке
             try:
                 save_backup_to_file()
-            except:
-                pass
+            except Exception as backup_error:
+                logger.error(f"Failed to save backup locally: {backup_error}")
         
         await asyncio.sleep(BACKUP_INTERVAL_SECONDS)
 

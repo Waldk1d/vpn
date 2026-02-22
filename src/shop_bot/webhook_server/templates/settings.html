@@ -703,18 +703,16 @@
 		<section class="settings-section">
 			<h2>Резервное копирование</h2>
 			<div class="host-card">
-				<p>Резервные копии создаются автоматически каждые 5 минут и отправляются в указанный чат.</p>
-				<div class="form-group">
-					<label for="backup_chat_id">Chat ID для отправки backup (например, -1003811623218):</label>
-					<input
-						type="text"
-						id="backup_chat_id"
-						name="backup_chat_id"
-						value="{{ settings.backup_chat_id or '' }}"
-						placeholder="-1003811623218"
-					/>
-					<small style="color: #666; font-size: 0.9em;">Оставьте пустым, если не хотите отправлять backup в чат</small>
-				</div>
+				<p>Резервные копии создаются автоматически каждые 5 минут и отправляются в чат, указанный в <code>config.json</code> (поле <code>backup_chat_id</code>).</p>
+				{% if settings.backup_chat_id %}
+				<p style="color: #4caf50; margin-top: 10px;">
+					✅ Chat ID настроен: <code>{{ settings.backup_chat_id }}</code>
+				</p>
+				{% else %}
+				<p style="color: #ff9800; margin-top: 10px;">
+					⚠️ Chat ID не указан в config.json. Backup будет сохраняться только локально.
+				</p>
+				{% endif %}
 				<div style="margin-top: 20px;">
 					<a href="{{ url_for('download_backup_route') }}" class="button button-primary" style="text-decoration: none; display: inline-block; margin-right: 10px;">
 						📥 Скачать резервную копию

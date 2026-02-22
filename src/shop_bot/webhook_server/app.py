@@ -160,14 +160,9 @@ def create_webhook_app(bot_controller_instance):
                 update_setting(checkbox_key, 'true' if value == 'true' else 'false')
 
             for key in ALL_SETTINGS_KEYS:
-                if key in ['panel_password', 'force_subscription', 'sbp_enabled', 'trial_enabled', 'enable_referrals']:
+                if key in ['panel_password', 'force_subscription', 'sbp_enabled', 'trial_enabled', 'enable_referrals', 'backup_chat_id']:
                     continue
                 update_setting(key, request.form.get(key, ''))
-            
-            # Обрабатываем backup_chat_id отдельно
-            if 'backup_chat_id' in request.form:
-                backup_chat_id = request.form.get('backup_chat_id', '').strip()
-                update_setting('backup_chat_id', backup_chat_id if backup_chat_id else None)
 
             flash('Настройки успешно сохранены!', 'success')
             return redirect(url_for('settings_page'))
