@@ -225,8 +225,36 @@ def get_user_router() -> Router:
         username = message.from_user.username or message.from_user.full_name
         user_data = get_user(user_id)
 
+        # Проверяем подписку на канал ПЕРЕД показом меню
+        channel_url = get_setting("channel_url")
+        channel_id_setting = get_setting("channel_id")
+        is_subscription_forced = get_setting("force_subscription") == "true"
+        
+        if is_subscription_forced and (channel_id_setting or channel_url):
+            logger.info(f"Checking subscription for user {user_id}. Channel ID: {channel_id_setting}, Channel URL: {channel_url}")
+            is_subscribed, error_msg = await check_channel_subscription(user_id, bot)
+            
+            if not is_subscribed:
+                logger.warning(f"User {user_id} is not subscribed to channel")
+                builder = InlineKeyboardBuilder()
+                if channel_url:
+                    builder.button(text="📢 Перейти в канал", url=channel_url)
+                builder.button(text="✅ Я подписался", callback_data="check_subscription_and_agree")
+                builder.adjust(1)
+                
+                await message.answer(
+                    f"❄️ <b>Morozovae VPN</b>\n\n"
+                    f"❌ {error_msg}\n\n"
+                    f"Для использования бота необходимо подписаться на наш канал.",
+                    reply_markup=builder.as_markup()
+                )
+                await state.set_state(Onboarding.waiting_for_subscription_and_agreement)
+                return
+
+        # Если пользователь уже согласился с условиями и подписан, показываем меню
         if user_data and user_data.get('agreed_to_terms'):
             await message.answer(
+                f"❄️ <b>Morozovae VPN</b>\n\n"
                 f"👋 Снова здравствуйте, {html.bold(message.from_user.full_name)}!",
                 reply_markup=keyboards.main_reply_keyboard
             )
@@ -235,25 +263,23 @@ def get_user_router() -> Router:
 
         terms_url = get_setting("terms_url")
         privacy_url = get_setting("privacy_url")
-        channel_url = get_setting("channel_url")
 
-        if not channel_url or not terms_url or not privacy_url:
+        if not terms_url or not privacy_url:
             set_terms_agreed(user_id)
             await show_main_menu(message)
             return
-
-        is_subscription_forced = get_setting("force_subscription") == "true"
         
-        show_welcome_screen = (is_subscription_forced and channel_url) or (terms_url and privacy_url)
+        show_welcome_screen = terms_url or privacy_url
 
         if not show_welcome_screen:
             set_terms_agreed(user_id)
             await show_main_menu(message)
             return
 
-        welcome_parts = ["<b>Добро пожаловать!</b>\n"]
+        welcome_parts = ["❄️ <b>Morozovae VPN</b>\n\n", "<b>Добро пожаловать!</b>\n"]
         
-        if is_subscription_forced and channel_url:
+        channel_id_setting = get_setting("channel_id")
+        if is_subscription_forced and (channel_id_setting or channel_url):
             welcome_parts.append("Для доступа ко всем функциям, пожалуйста, подпишитесь на наш канал.\n")
         
         if terms_url:
@@ -282,91 +308,29 @@ def get_user_router() -> Router:
     async def check_subscription_handler(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
         user_id = callback.from_user.id
         channel_url = get_setting("channel_url")
+        channel_id_setting = get_setting("channel_id")
         is_subscription_forced = get_setting("force_subscription") == "true"
 
-        logger.info(f"Checking subscription for user {user_id}. Force subscription: {is_subscription_forced}, Channel URL: {channel_url}")
+        logger.info(f"Checking subscription for user {user_id}. Force subscription: {is_subscription_forced}, Channel ID: {channel_id_setting}, Channel URL: {channel_url}")
 
-        if not is_subscription_forced or not channel_url:
-            logger.info(f"Subscription check skipped: force_subscription={is_subscription_forced}, channel_url={channel_url}")
+        if not is_subscription_forced or (not channel_id_setting and not channel_url):
+            logger.info(f"Subscription check skipped: force_subscription={is_subscription_forced}")
             await process_successful_onboarding(callback, state)
             return
-            
-        try:
-            # Парсим URL канала
-            channel_id = None
-            if 't.me/' in channel_url:
-                # Формат: https://t.me/nnstorenews или t.me/nnstorenews
-                channel_username = channel_url.split('t.me/')[-1].split('?')[0].split('/')[-1].strip()
-                if channel_username:
-                    channel_id = '@' + channel_username
-            elif channel_url.startswith('@'):
-                # Уже в формате @channel
-                channel_id = channel_url
-            elif '@' in channel_url:
-                # Формат @channel
-                channel_id = channel_url
-            
-            if not channel_id:
-                logger.error(f"Неверный формат URL канала: {channel_url}. Не удалось извлечь username.")
-                await callback.answer("Ошибка: Неверный формат URL канала. Обратитесь к администратору.", show_alert=True)
-                return
-
-            logger.info(f"Checking membership for user {user_id} in channel {channel_id}")
-            member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
-            logger.info(f"User {user_id} status in channel {channel_id}: {member.status}")
-            
-            if member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]:
-                logger.info(f"User {user_id} is subscribed to channel {channel_id}")
-                await process_successful_onboarding(callback, state)
-            else:
-                logger.warning(f"User {user_id} is NOT subscribed to channel {channel_id}. Status: {member.status}")
-                await callback.answer("❌ Вы еще не подписались на канал. Пожалуйста, подпишитесь и попробуйте снова.", show_alert=True)
-
-        except Exception as e:
-            logger.error(f"Ошибка при проверке подписки для user_id {user_id} на канал {channel_url}: {e}", exc_info=True)
-            await callback.answer("❌ Не удалось проверить подписку. Убедитесь, что бот является администратором канала. Попробуйте позже.", show_alert=True)
+        
+        # Используем функцию check_channel_subscription для единообразия
+        is_subscribed, error_msg = await check_channel_subscription(user_id, bot)
+        
+        if is_subscribed:
+            logger.info(f"User {user_id} is subscribed to channel")
+            await process_successful_onboarding(callback, state)
+        else:
+            logger.warning(f"User {user_id} is NOT subscribed to channel. Error: {error_msg}")
+            await callback.answer(f"❌ {error_msg}", show_alert=True)
 
     @user_router.message(Onboarding.waiting_for_subscription_and_agreement)
     async def onboarding_fallback_handler(message: types.Message):
         await message.answer("Пожалуйста, выполните требуемые действия и нажмите на кнопку в сообщении выше.")
-
-    async def check_channel_subscription(user_id: int, bot: Bot) -> tuple[bool, str]:
-        """Проверяет подписку пользователя на канал. Возвращает (is_subscribed, error_message)"""
-        channel_url = get_setting("channel_url")
-        is_subscription_forced = get_setting("force_subscription") == "true"
-        
-        if not is_subscription_forced or not channel_url:
-            return True, ""  # Подписка не требуется
-        
-        try:
-            # Парсим URL канала
-            channel_id = None
-            if 't.me/' in channel_url:
-                # Формат: https://t.me/nnstorenews или t.me/nnstorenews
-                channel_username = channel_url.split('t.me/')[-1].split('?')[0].split('/')[-1].strip()
-                if channel_username:
-                    channel_id = '@' + channel_username
-            elif channel_url.startswith('@'):
-                # Уже в формате @channel
-                channel_id = channel_url
-            elif '@' in channel_url:
-                # Формат @channel
-                channel_id = channel_url
-            
-            if not channel_id:
-                logger.error(f"Неверный формат URL канала: {channel_url}")
-                return False, "Ошибка конфигурации канала"
-            
-            member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
-            
-            if member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]:
-                return True, ""
-            else:
-                return False, f"Вы не подписаны на канал. Пожалуйста, подпишитесь: {channel_url}"
-                
-        except Exception as e:
-            logger.error(f"Ошибка при проверке подписки для user_id {user_id} на канал {channel_url}: {e}", exc_info=True)
-            return False, "Не удалось проверить подписку. Убедитесь, что бот является администратором канала."
 
     @user_router.message(F.text == "🏠 Главное меню")
     @registration_required

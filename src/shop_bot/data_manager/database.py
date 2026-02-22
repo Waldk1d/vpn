@@ -191,6 +191,7 @@ def initialize_db():
                 "usdt_rub_rate": None,
                 "ton_usdt_rate": None,
                 "backup_chat_id": None,
+                "channel_id": None,
                 "android_url": "https://telegra.ph/Instrukciya-Android-11-09",
                 "windows_url": "https://telegra.ph/Instrukciya-Windows-11-09",
                 "ios_url": "https://telegra.ph/Instrukcii-ios-11-09",
