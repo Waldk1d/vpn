@@ -8,10 +8,14 @@ from aiogram import Bot
 
 from shop_bot.bot_controller import BotController
 from shop_bot.data_manager import database
+from shop_bot.data_manager.backup_manager import save_backup_to_file, create_backup
 from shop_bot.modules import xui_api
 from shop_bot.bot import keyboards
+from aiogram.types import BufferedInputFile
+import json
 
 CHECK_INTERVAL_SECONDS = 300
+BACKUP_INTERVAL_SECONDS = 300  # 5 минут
 NOTIFY_BEFORE_HOURS = {72, 48, 24, 1}
 notified_users = {}
 
@@ -185,6 +189,64 @@ async def sync_keys_with_panels():
             logger.error(f"Scheduler: An unexpected error occurred while processing host '{host_name}': {e}", exc_info=True)
             
     logger.info(f"Scheduler: Sync with XUI panels finished. Total records affected: {total_affected_records}.")
+
+async def send_backup_to_chat(bot: Bot, chat_id: str):
+    """Отправляет резервную копию в указанный чат"""
+    try:
+        backup_data = create_backup()
+        if not backup_data:
+            logger.error("Failed to create backup for sending")
+            return
+        
+        # Сохраняем backup в файл
+        backup_json = json.dumps(backup_data, ensure_ascii=False, indent=2)
+        backup_file = BufferedInputFile(
+            backup_json.encode('utf-8'),
+            filename=f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        )
+        
+        await bot.send_document(
+            chat_id=chat_id,
+            document=backup_file,
+            caption=f"📦 Резервная копия данных\n🕐 {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
+        )
+        logger.info(f"Backup sent to chat {chat_id}")
+    except Exception as e:
+        logger.error(f"Error sending backup to chat: {e}", exc_info=True)
+
+async def periodic_backup_task(bot_controller: BotController):
+    """Периодическая задача для отправки backup каждые 5 минут"""
+    logger.info("Backup task has been started.")
+    await asyncio.sleep(60)  # Ждем 1 минуту после запуска
+    
+    while True:
+        try:
+            if bot_controller.get_status().get("is_running"):
+                bot = bot_controller.get_bot_instance()
+                if bot:
+                    backup_chat_id = database.get_setting("backup_chat_id")
+                    if backup_chat_id:
+                        await send_backup_to_chat(bot, backup_chat_id)
+                        # Также сохраняем локально
+                        save_backup_to_file()
+                    else:
+                        # Сохраняем только локально, если chat_id не указан
+                        save_backup_to_file()
+                else:
+                    logger.warning("Backup task: Bot instance is not available, saving locally only")
+                    save_backup_to_file()
+            else:
+                logger.info("Backup task: Bot is stopped, saving locally only")
+                save_backup_to_file()
+        except Exception as e:
+            logger.error(f"Backup task: An error occurred: {e}", exc_info=True)
+            # Пытаемся сохранить локально даже при ошибке
+            try:
+                save_backup_to_file()
+            except:
+                pass
+        
+        await asyncio.sleep(BACKUP_INTERVAL_SECONDS)
 
 async def periodic_subscription_check(bot_controller: BotController):
     logger.info("Scheduler has been started.")

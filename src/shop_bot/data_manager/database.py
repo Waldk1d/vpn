@@ -201,7 +201,7 @@ def initialize_db():
             
             # Загружаем настройки из config.json и обновляем их в базе данных
             if config_data:
-                config_keys = ["telegram_bot_token", "telegram_bot_username", "admin_telegram_id"]
+                config_keys = ["telegram_bot_token", "telegram_bot_username", "admin_telegram_id", "cryptobot_token", "backup_chat_id"]
                 for key in config_keys:
                     if key in config_data and config_data[key]:
                         # Убираем @ из username, если он есть

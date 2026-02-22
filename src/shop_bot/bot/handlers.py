@@ -1577,14 +1577,15 @@ async def process_successful_payment(bot: Bot, metadata: dict):
         months = int(metadata['months'])
         price = float(metadata['price'])
         action = metadata['action']
-        key_id = int(metadata['key_id'])
+        # key_id может быть 0 для новых ключей
+        key_id = int(metadata.get('key_id', 0))
         host_name = metadata.get('host_name')
         # Если host_name == "none" или пустая строка, устанавливаем None
         if host_name == "none" or host_name == "":
             host_name = None
-        plan_id = int(metadata['plan_id'])
+        plan_id = int(metadata.get('plan_id', 0))
         customer_email = metadata.get('customer_email')
-        payment_method = metadata.get('payment_method')
+        payment_method = metadata.get('payment_method', 'Unknown')
 
         chat_id_to_delete = metadata.get('chat_id')
         message_id_to_delete = metadata.get('message_id')
@@ -1641,6 +1642,9 @@ async def process_successful_payment(bot: Bot, metadata: dict):
             if not new_key_id:
                 await processing_message.edit_text("❌ Не удалось создать ключ.")
                 return
+            
+            # Явно привязываем subscription ссылку к ключу (для надежности)
+            assign_subscription_link(subscription_url, user_id, new_key_id, expiry_date)
             
             result = {
                 'subscription_url': subscription_url,

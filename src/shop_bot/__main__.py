@@ -4,7 +4,7 @@ import asyncio
 import signal
 
 from shop_bot.webhook_server.app import create_webhook_app
-from shop_bot.data_manager.scheduler import periodic_subscription_check
+from shop_bot.data_manager.scheduler import periodic_subscription_check, periodic_backup_task
 from shop_bot.data_manager import database
 from shop_bot.bot_controller import BotController
 
@@ -51,6 +51,7 @@ def main():
         logger.info("Application is running. Bot can be started from the web panel.")
         
         asyncio.create_task(periodic_subscription_check(bot_controller))
+        asyncio.create_task(periodic_backup_task(bot_controller))
 
         await asyncio.Future()
 

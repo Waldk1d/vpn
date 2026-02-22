@@ -23,6 +23,7 @@ from shop_bot.data_manager.database import (
     ban_user, unban_user, delete_user_keys, get_setting, find_and_complete_ton_transaction,
     update_host_subscription_token, get_free_subscription_count, get_all_subscription_links
 )
+from shop_bot.data_manager.backup_manager import save_backup_to_file, restore_from_backup, load_backup_from_file
 
 _bot_controller = None
 
@@ -162,6 +163,11 @@ def create_webhook_app(bot_controller_instance):
                 if key in ['panel_password', 'force_subscription', 'sbp_enabled', 'trial_enabled', 'enable_referrals']:
                     continue
                 update_setting(key, request.form.get(key, ''))
+            
+            # Обрабатываем backup_chat_id отдельно
+            if 'backup_chat_id' in request.form:
+                backup_chat_id = request.form.get('backup_chat_id', '').strip()
+                update_setting('backup_chat_id', backup_chat_id if backup_chat_id else None)
 
             flash('Настройки успешно сохранены!', 'success')
             return redirect(url_for('settings_page'))
@@ -371,15 +377,19 @@ def create_webhook_app(bot_controller_instance):
                     logger.error(f"CryptoBot Webhook: Invalid payload format received: {payload_string} (parts: {len(parts)})")
                     return 'OK', 200  # Возвращаем OK, чтобы CryptoBot не повторял запрос
 
+                # Обрабатываем key_id: для новых ключей может быть 0 или "0"
+                key_id_str = parts[4] if len(parts) > 4 else "0"
+                key_id = int(key_id_str) if key_id_str and key_id_str != 'none' else 0
+                
                 metadata = {
                     "user_id": parts[0],
                     "months": parts[1],
                     "price": parts[2],
                     "action": parts[3],
-                    "key_id": parts[4],
-                    "host_name": parts[5] if parts[5] != 'none' else None,
-                    "plan_id": parts[6],
-                    "customer_email": parts[7] if parts[7] and parts[7] != 'None' and parts[7] != '' else None,
+                    "key_id": key_id,
+                    "host_name": parts[5] if len(parts) > 5 and parts[5] != 'none' else None,
+                    "plan_id": parts[6] if len(parts) > 6 else None,
+                    "customer_email": parts[7] if len(parts) > 7 and parts[7] and parts[7] != 'None' and parts[7] != '' else None,
                     "payment_method": parts[8] if len(parts) > 8 else "CryptoBot"
                 }
                 
@@ -471,5 +481,64 @@ def create_webhook_app(bot_controller_instance):
         except Exception as e:
             logger.error(f"Error in ton webhook handler: {e}", exc_info=True)
             return 'Error', 500
+    
+    @flask_app.route('/backup/restore', methods=['POST'])
+    @login_required
+    def restore_backup_route():
+        try:
+            if 'backup_file' not in request.files:
+                flash('Файл не выбран', 'error')
+                return redirect(url_for('settings_page'))
+            
+            file = request.files['backup_file']
+            if file.filename == '':
+                flash('Файл не выбран', 'error')
+                return redirect(url_for('settings_page'))
+            
+            if not file.filename.endswith('.json'):
+                flash('Неверный формат файла. Требуется JSON файл.', 'error')
+                return redirect(url_for('settings_page'))
+            
+            # Читаем содержимое файла
+            backup_data = json.load(file)
+            
+            # Восстанавливаем данные
+            if restore_from_backup(backup_data):
+                flash('Резервная копия успешно восстановлена!', 'success')
+            else:
+                flash('Ошибка при восстановлении резервной копии. Проверьте логи.', 'error')
+            
+            return redirect(url_for('settings_page'))
+        except json.JSONDecodeError:
+            flash('Ошибка: Неверный формат JSON файла.', 'error')
+            return redirect(url_for('settings_page'))
+        except Exception as e:
+            logger.error(f"Error restoring backup: {e}", exc_info=True)
+            flash(f'Ошибка при восстановлении: {e}', 'error')
+            return redirect(url_for('settings_page'))
+    
+    @flask_app.route('/backup/download', methods=['GET'])
+    @login_required
+    def download_backup_route():
+        try:
+            from flask import send_file
+            from pathlib import Path
+            
+            # Создаем backup
+            if save_backup_to_file():
+                backup_path = Path(__file__).parent.parent.parent.parent / "backup.json"
+                if backup_path.exists():
+                    return send_file(
+                        str(backup_path),
+                        as_attachment=True,
+                        download_name=f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                    )
+            
+            flash('Ошибка при создании резервной копии', 'error')
+            return redirect(url_for('settings_page'))
+        except Exception as e:
+            logger.error(f"Error downloading backup: {e}", exc_info=True)
+            flash(f'Ошибка при создании резервной копии: {e}', 'error')
+            return redirect(url_for('settings_page'))
 
     return flask_app
