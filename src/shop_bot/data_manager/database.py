@@ -17,7 +17,24 @@ else:
 DB_FILE = PROJECT_ROOT / "users.db"
 CONFIG_FILE = PROJECT_ROOT / "config.json"
 
+def _load_config_from_file():
+    """Загружает настройки из config.json, если файл существует"""
+    if not CONFIG_FILE.exists():
+        logger.info(f"Config file not found at {CONFIG_FILE}. Skipping config load.")
+        return {}
+    
+    try:
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+            logger.info(f"Loaded config from {CONFIG_FILE}")
+            return config
+    except Exception as e:
+        logger.warning(f"Failed to load config from {CONFIG_FILE}: {e}")
+        return {}
+
 def initialize_db():
+    # Загружаем настройки из config.json, если файл существует
+    config_data = _load_config_from_file()
     try:
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
