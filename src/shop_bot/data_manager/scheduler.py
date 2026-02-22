@@ -244,7 +244,7 @@ async def periodic_backup_task(bot_controller: BotController):
             bot_status = bot_controller.get_status()
             logger.info(f"Bot status: {bot_status}")
             
-            if bot_status.get("is_running"):
+            if bot_status.get("shop_bot_running"):
                 bot = bot_controller.get_bot_instance()
                 logger.info(f"Bot instance available: {bot is not None}")
                 
