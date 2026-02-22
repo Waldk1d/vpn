@@ -140,8 +140,7 @@ async def show_main_menu(message: types.Message, edit_message: bool = False):
 
     text = (
         "❄️ <b>Morozovae VPN</b>\n\n"
-        "🏠 <b>Главное меню</b>\n\n"
-        "✨ Выберите действие из меню ниже:"
+        "Выберите нужное действие:"
     )
     keyboard = keyboards.create_main_menu_keyboard(user_keys, trial_available, is_admin)
     
@@ -254,8 +253,8 @@ def get_user_router() -> Router:
         # Если пользователь уже согласился с условиями и подписан, показываем меню
         if user_data and user_data.get('agreed_to_terms'):
             await message.answer(
-                f"❄️ <b>Morozovae VPN</b>\n\n"
-                f"👋 Снова здравствуйте, {html.bold(message.from_user.full_name)}!",
+                f"✨ <b>Добро пожаловать {html.bold(message.from_user.full_name)}!</b> ✨\n\n"
+                f"🎉 Рады Вас видеть в нашем сервисе!",
                 reply_markup=keyboards.main_reply_keyboard
             )
             await show_main_menu(message)
@@ -699,44 +698,47 @@ def get_user_router() -> Router:
     async def about_handler(callback: types.CallbackQuery):
         await callback.answer()
         
-        about_text = get_setting("about_text")
+        channel_url = get_setting("channel_url")
         terms_url = get_setting("terms_url")
         privacy_url = get_setting("privacy_url")
-        channel_url = get_setting("channel_url")
 
-        final_text = about_text if about_text else "Информация о проекте не добавлена."
+        about_text = (
+            "❄️ <b>Morozovae VPN</b>\n\n"
+            "🔐 <b>О нашем проекте</b>\n\n"
+            "Мы предоставляем качественный VPN сервис с высокой скоростью и надежным шифрованием.\n\n"
+            "✨ <b>Наши преимущества:</b>\n"
+            "• Быстрое и стабильное соединение\n"
+            "• Защита вашей приватности\n"
+            "• Обход любых ограничений\n"
+            "• Круглосуточная поддержка\n\n"
+            "📢 Подписывайтесь на наш канал, чтобы быть в курсе новостей и акций!"
+        )
 
         keyboard = keyboards.create_about_keyboard(channel_url, terms_url, privacy_url)
 
         await callback.message.edit_text(
-            final_text,
+            about_text,
             reply_markup=keyboard,
             disable_web_page_preview=True
         )
 
     @user_router.callback_query(F.data == "show_help")
     @registration_required
-    async def about_handler(callback: types.CallbackQuery):
+    async def help_handler(callback: types.CallbackQuery):
         await callback.answer()
 
-        support_user = get_setting("support_user")
-        support_text = get_setting("support_text")
+        support_text = (
+            "🆘 <b>Служба поддержки</b>\n\n"
+            "💬 У вас возникли вопросы или нужна помощь?\n"
+            "Наша команда поддержки всегда готова помочь вам!\n\n"
+            "⏰ <b>Время работы:</b> Круглосуточно\n"
+            "📞 <b>Связь:</b> Нажмите кнопку ниже для связи с нами"
+        )
 
-        if support_user == None and support_text == None:
-            await callback.message.edit_text(
-                "Информация о поддержке не установлена. Установите её в админ-панели.",
-                reply_markup=keyboards.create_back_to_menu_keyboard()
-            )
-        elif support_text == None:
-            await callback.message.edit_text(
-                "Для связи с поддержкой используйте кнопку ниже.",
-                reply_markup=keyboards.create_support_keyboard(support_user)
-            )
-        else:
-            await callback.message.edit_text(
-                support_text + "\n\n",
-                reply_markup=keyboards.create_support_keyboard(support_user)
-            )
+        await callback.message.edit_text(
+            support_text,
+            reply_markup=keyboards.create_support_keyboard("https://t.me/nabeoa")
+        )
 
     @user_router.callback_query(F.data == "manage_keys")
     @registration_required
