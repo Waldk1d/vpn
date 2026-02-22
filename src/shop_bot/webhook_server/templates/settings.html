@@ -483,7 +483,19 @@
 						value="{{ settings.cryptobot_token or '' }}"
 					/>
 					<button type="button" class="toggle-password">👁️</button>
+					<small style="color: #666; font-size: 0.9em;">Получите токен у @CryptoBot или @CryptoTestnetBot</small>
 				</div>
+				{% if settings.domain %}
+				<div class="form-group">
+					<label>CryptoBot Webhook URL:</label>
+					<code style="display: block; padding: 8px; background: #f5f5f5; border-radius: 4px; margin-top: 5px; word-break: break-all;">
+						https://{{ settings.domain }}/cryptobot-webhook
+					</code>
+					<small style="color: #666; font-size: 0.9em;">
+						Скопируйте этот URL и укажите его в настройках CryptoBot в разделе "Webhook"
+					</small>
+				</div>
+				{% endif %}
 				<h2>Настройка Heleket</h2>
 				<div class="form-group">
 					<label for="heleket_merchant_id">Heleket Merchant ID:</label>
@@ -505,13 +517,39 @@
 					<button type="button" class="toggle-password">👁️</button>
 				</div>
 				<div class="form-group">
-					<label for="domain">Ваш домен (например, my-shop.com):</label>
+					<label for="domain">Ваш домен (например, vpn-sinv.onrender.com):</label>
 					<input
 						type="text"
 						id="domain"
 						name="domain"
 						value="{{ settings.domain or '' }}"
+						placeholder="vpn-sinv.onrender.com"
 					/>
+					<small style="color: #666; font-size: 0.9em;">Указывайте домен БЕЗ https://</small>
+				</div>
+				<h2>Webhook URLs</h2>
+				<div class="form-group">
+					<label>URL для CryptoBot Webhook:</label>
+					{% if settings.domain %}
+					<code style="display: block; padding: 8px; background: #f5f5f5; border-radius: 4px; margin-top: 5px;">
+						https://{{ settings.domain }}/cryptobot-webhook
+					</code>
+					<small style="color: #666; font-size: 0.9em;">
+						Скопируйте этот URL и укажите его в настройках CryptoBot (@CryptoBot или @CryptoTestnetBot) в разделе "Webhook"
+					</small>
+					{% else %}
+					<p style="color: #f44336;">⚠️ Сначала укажите домен выше</p>
+					{% endif %}
+				</div>
+				<div class="form-group">
+					<label>URL для Heleket Webhook:</label>
+					{% if settings.domain %}
+					<code style="display: block; padding: 8px; background: #f5f5f5; border-radius: 4px; margin-top: 5px;">
+						https://{{ settings.domain }}/heleket-webhook
+					</code>
+					{% else %}
+					<p style="color: #f44336;">⚠️ Сначала укажите домен выше</p>
+					{% endif %}
 				</div>
 				<h2>Настройка TonConnect</h2>
 				<div class="form-group">
