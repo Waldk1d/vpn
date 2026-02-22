@@ -3,11 +3,19 @@ from datetime import datetime
 import logging
 from pathlib import Path
 import json
+import os
 
 logger = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path("/app/project")
+# Определяем корень проекта (либо /app/project для Docker, либо текущая директория)
+if os.path.exists("/app/project"):
+    PROJECT_ROOT = Path("/app/project")
+else:
+    # Для локальной разработки - поднимаемся на 2 уровня вверх от database.py
+    PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+
 DB_FILE = PROJECT_ROOT / "users.db"
+CONFIG_FILE = PROJECT_ROOT / "config.json"
 
 def initialize_db():
     try:
@@ -171,6 +179,18 @@ def initialize_db():
             run_migration()
             for key, value in default_settings.items():
                 cursor.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES (?, ?)", (key, value))
+            
+            # Загружаем настройки из config.json и обновляем их в базе данных
+            if config_data:
+                config_keys = ["telegram_bot_token", "telegram_bot_username", "admin_telegram_id"]
+                for key in config_keys:
+                    if key in config_data and config_data[key]:
+                        # Убираем @ из username, если он есть
+                        if key == "telegram_bot_username" and config_data[key].startswith("@"):
+                            config_data[key] = config_data[key][1:]
+                        cursor.execute("UPDATE bot_settings SET value = ? WHERE key = ?", (config_data[key], key))
+                        logger.info(f"Updated {key} from config.json")
+            
             conn.commit()
             logging.info("Database initialized successfully.")
     except sqlite3.Error as e:

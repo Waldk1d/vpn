@@ -1119,14 +1119,6 @@ def get_user_router() -> Router:
             await callback.message.edit_text("❌ Произошла ошибка при выборе тарифа.")
             await state.clear()
             return
-        
-        plan_id = data.get('plan_id')
-        plan = get_plan_by_id(plan_id)
-
-        if not plan:
-            await callback.message.answer("Произошла ошибка при выборе тарифа.")
-            await state.clear()
-            return
 
         base_price = Decimal(str(plan['price']))
         price_rub = base_price
@@ -1156,7 +1148,9 @@ def get_user_router() -> Router:
 
             crypto = CryptoPay(cryptobot_token)
             
-            payload_data = f"{user_id}:{months}:{float(price_rub)}:{action}:{key_id}:{host_name}:{plan_id}:{customer_email}:CryptoBot"
+            # Обрабатываем случай, когда host_name может быть None
+            host_name_str = str(host_name) if host_name else "none"
+            payload_data = f"{user_id}:{months}:{float(price_rub)}:{action}:{key_id}:{host_name_str}:{plan_id}:{customer_email or ''}:CryptoBot"
 
             invoice = await crypto.create_invoice(
                 currency_type="fiat",

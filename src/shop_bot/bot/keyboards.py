@@ -105,6 +105,8 @@ def create_skip_email_keyboard() -> InlineKeyboardMarkup:
 def create_payment_method_keyboard(payment_methods: dict, action: str, key_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
+    logger.info(f"Creating payment method keyboard. Available methods: {payment_methods}")
+
     if payment_methods and payment_methods.get("yookassa"):
         if get_setting("sbp_enabled"):
             builder.button(text="🏦 СБП / Банковская карта", callback_data="pay_yookassa")
@@ -118,6 +120,8 @@ def create_payment_method_keyboard(payment_methods: dict, action: str, key_id: i
         callback_data_ton = "pay_tonconnect"
         logger.info(f"Creating TON button with callback_data: '{callback_data_ton}'")
         builder.button(text="🪙 TON Connect", callback_data=callback_data_ton)
+    else:
+        logger.warning(f"TON Connect not enabled. payment_methods: {payment_methods}, tonconnect value: {payment_methods.get('tonconnect') if payment_methods else 'None'}")
 
     builder.button(text="⬅️ Назад", callback_data="back_to_email_prompt")
     builder.adjust(1)

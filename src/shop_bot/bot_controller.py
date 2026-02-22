@@ -98,6 +98,8 @@ class BotController:
             ton_wallet_address = database.get_setting("ton_wallet_address")
             tonapi_key = database.get_setting("tonapi_key")
             tonconnect_enabled = bool(ton_wallet_address and tonapi_key)
+            
+            logger.info(f"TON Connect settings: wallet_address={bool(ton_wallet_address)}, tonapi_key={bool(tonapi_key)}, enabled={tonconnect_enabled}")
 
             if yookassa_enabled:
                 Configuration.account_id = yookassa_shop_id
