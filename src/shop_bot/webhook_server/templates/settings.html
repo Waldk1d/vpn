@@ -533,6 +533,34 @@
 					/>
 					<button type="button" class="toggle-password">👁️</button>
 				</div>
+				<h2>Курсы валют (резервные значения)</h2>
+				<p style="color: #666; font-size: 0.9em; margin-bottom: 10px;">
+					Эти значения используются, если API Binance недоступен. Оставьте пустыми для автоматического получения курсов.
+				</p>
+				<div class="form-group">
+					<label for="usdt_rub_rate">USDT/RUB курс (например, 95.50):</label>
+					<input
+						type="number"
+						step="0.01"
+						id="usdt_rub_rate"
+						name="usdt_rub_rate"
+						value="{{ settings.usdt_rub_rate or '' }}"
+						placeholder="Оставьте пустым для авто-получения"
+					/>
+					<small style="color: #666; font-size: 0.9em;">Используется для CryptoBot и TON Connect</small>
+				</div>
+				<div class="form-group">
+					<label for="ton_usdt_rate">TON/USDT курс (например, 5.25):</label>
+					<input
+						type="number"
+						step="0.01"
+						id="ton_usdt_rate"
+						name="ton_usdt_rate"
+						value="{{ settings.ton_usdt_rate or '' }}"
+						placeholder="Оставьте пустым для авто-получения"
+					/>
+					<small style="color: #666; font-size: 0.9em;">Используется для TON Connect</small>
+				</div>
 			</section>
 
 			<section class="settings-section">

@@ -33,7 +33,7 @@ ALL_SETTINGS_KEYS = [
     "telegram_bot_username", "admin_telegram_id", "yookassa_shop_id",
     "yookassa_secret_key", "sbp_enabled", "receipt_email", "cryptobot_token",
     "heleket_merchant_id", "heleket_api_key", "domain", "referral_percentage",
-    "referral_discount", "ton_wallet_address", "tonapi_key", "force_subscription", "trial_enabled", "trial_duration_days", "enable_referrals", "minimum_withdrawal",
+    "referral_discount", "ton_wallet_address", "tonapi_key", "usdt_rub_rate", "ton_usdt_rate", "force_subscription", "trial_enabled", "trial_duration_days", "enable_referrals", "minimum_withdrawal",
     "support_group_id", "support_bot_token"
 ]
 
@@ -333,20 +333,43 @@ def create_webhook_app(bot_controller_instance):
     def cryptobot_webhook_handler():
         try:
             request_data = request.json
+            logger.info(f"CryptoBot Webhook received: {request_data}")
             
-            if request_data and request_data.get('update_type') == 'invoice_paid':
-                payload_data = request_data.get('payload', {})
+            if not request_data:
+                logger.warning("CryptoBot Webhook: Empty request data")
+                return 'OK', 200
+            
+            # Проверяем формат данных от aiocryptopay
+            # Может быть update_type или другой формат
+            update_type = request_data.get('update_type') or request_data.get('type')
+            
+            if update_type == 'invoice_paid' or (request_data.get('invoice') and request_data.get('invoice', {}).get('status') == 'paid'):
+                # Получаем payload из разных возможных мест
+                payload_string = None
                 
-                payload_string = payload_data.get('payload')
+                # Вариант 1: payload в корне запроса
+                if 'payload' in request_data:
+                    payload_string = request_data.get('payload')
+                
+                # Вариант 2: payload внутри invoice
+                elif 'invoice' in request_data:
+                    invoice_data = request_data.get('invoice', {})
+                    payload_string = invoice_data.get('payload')
+                
+                # Вариант 3: payload внутри payload объекта
+                elif isinstance(request_data.get('payload'), dict):
+                    payload_string = request_data.get('payload', {}).get('payload')
                 
                 if not payload_string:
-                    logger.warning("CryptoBot Webhook: Received paid invoice but payload was empty.")
+                    logger.warning(f"CryptoBot Webhook: Received paid invoice but payload was empty. Full data: {request_data}")
                     return 'OK', 200
+
+                logger.info(f"CryptoBot Webhook: Processing payload: {payload_string}")
 
                 parts = payload_string.split(':')
                 if len(parts) < 9:
-                    logger.error(f"cryptobot Webhook: Invalid payload format received: {payload_string}")
-                    return 'Error', 400
+                    logger.error(f"CryptoBot Webhook: Invalid payload format received: {payload_string} (parts: {len(parts)})")
+                    return 'OK', 200  # Возвращаем OK, чтобы CryptoBot не повторял запрос
 
                 metadata = {
                     "user_id": parts[0],
@@ -354,11 +377,13 @@ def create_webhook_app(bot_controller_instance):
                     "price": parts[2],
                     "action": parts[3],
                     "key_id": parts[4],
-                    "host_name": parts[5],
+                    "host_name": parts[5] if parts[5] != 'none' else None,
                     "plan_id": parts[6],
-                    "customer_email": parts[7] if parts[7] != 'None' else None,
-                    "payment_method": parts[8]
+                    "customer_email": parts[7] if parts[7] and parts[7] != 'None' and parts[7] != '' else None,
+                    "payment_method": parts[8] if len(parts) > 8 else "CryptoBot"
                 }
+                
+                logger.info(f"CryptoBot Webhook: Parsed metadata: {metadata}")
                 
                 bot = _bot_controller.get_bot_instance()
                 loop = current_app.config.get('EVENT_LOOP')
@@ -366,14 +391,15 @@ def create_webhook_app(bot_controller_instance):
 
                 if bot and loop and loop.is_running():
                     asyncio.run_coroutine_threadsafe(payment_processor(bot, metadata), loop)
+                    logger.info("CryptoBot Webhook: Payment processing started")
                 else:
-                    logger.error("cryptobot Webhook: Could not process payment because bot or event loop is not running.")
+                    logger.error("CryptoBot Webhook: Could not process payment because bot or event loop is not running.")
 
             return 'OK', 200
             
         except Exception as e:
             logger.error(f"Error in cryptobot webhook handler: {e}", exc_info=True)
-            return 'Error', 500
+            return 'OK', 200  # Возвращаем OK, чтобы CryptoBot не повторял запрос при ошибке
         
     @flask_app.route('/heleket-webhook', methods=['POST'])
     def heleket_webhook_handler():

@@ -10,7 +10,7 @@ dependencies = [
     "python-dotenv==1.1.1",
     "qrcode[pil]==8.2",
     "yookassa==3.5.0",
-    "aiosend==2.1.2",
+    "aiocryptopay>=1.0.0",
     "aiohttp==3.9.5",
     "aiohttp-sse-client==0.2.1",
     "pytonconnect==0.3.2"

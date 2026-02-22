@@ -16,7 +16,7 @@ from functools import wraps
 from yookassa import Payment
 from io import BytesIO
 from datetime import datetime, timedelta
-from aiosend import CryptoPay, TESTNET
+from aiocryptopay import AioCryptoPay, Networks
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict
 
@@ -1131,49 +1131,68 @@ def get_user_router() -> Router:
                 price_rub = base_price - discount_amount
         months = plan['months']
         
+        crypto = None
         try:
-            exchange_rate = await get_usdt_rub_rate()
+            logger.info(f"Creating Crypto Pay invoice for user {user_id}. Plan price: {price_rub} RUB.")
 
-            if not exchange_rate:
-                logger.warning("Failed to get live exchange rate. Falling back to the rate from settings.")
-                if not exchange_rate:
-                    await callback.message.edit_text("❌ Не удалось получить курс валют. Попробуйте позже.")
-                    await state.clear()
-                    return
-
-            margin = Decimal("1.03")
-            price_usdt = (price_rub / exchange_rate * margin).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            
-            logger.info(f"Creating Crypto Pay invoice for user {user_id}. Plan price: {price_rub} RUB. Converted to: {price_usdt} USDT.")
-
-            crypto = CryptoPay(cryptobot_token)
+            crypto = AioCryptoPay(token=cryptobot_token, network=Networks.MAIN_NET)
             
             # Обрабатываем случай, когда host_name может быть None
             host_name_str = str(host_name) if host_name else "none"
             payload_data = f"{user_id}:{months}:{float(price_rub)}:{action}:{key_id}:{host_name_str}:{plan_id}:{customer_email or ''}:CryptoBot"
 
+            # Создаем инвойс в фиатной валюте (RUB)
+            # Согласно документации aiocryptopay: create_invoice(amount=5, fiat='USD', currency_type='fiat')
             invoice = await crypto.create_invoice(
-                currency_type="fiat",
-                fiat="RUB",
                 amount=float(price_rub),
+                fiat="RUB",
+                currency_type="fiat",
                 description=f"Подписка на {months} мес.",
                 payload=payload_data,
                 expires_in=3600
             )
             
-            if not invoice or not invoice.pay_url:
-                raise Exception("Failed to create invoice or pay_url is missing.")
+            logger.info(f"CryptoBot invoice created: {invoice}")
+            
+            # Проверяем наличие bot_invoice_url
+            if not invoice:
+                raise Exception("Failed to create invoice: invoice is None")
+            
+            # Получаем URL инвойса
+            invoice_url = None
+            if hasattr(invoice, 'bot_invoice_url'):
+                invoice_url = invoice.bot_invoice_url
+            elif hasattr(invoice, 'pay_url'):
+                invoice_url = invoice.pay_url
+            elif hasattr(invoice, 'invoice_url'):
+                invoice_url = invoice.invoice_url
+            
+            if not invoice_url:
+                logger.error(f"Invoice object attributes: {dir(invoice)}")
+                raise Exception(f"Failed to get invoice URL. Invoice object: {invoice}")
 
             await callback.message.edit_text(
                 "Нажмите на кнопку ниже для оплаты:",
-                reply_markup=keyboards.create_payment_keyboard(invoice.pay_url)
+                reply_markup=keyboards.create_payment_keyboard(invoice_url)
             )
             await state.clear()
 
         except Exception as e:
             logger.error(f"Failed to create Crypto Pay invoice for user {user_id}: {e}", exc_info=True)
-            await callback.message.edit_text(f"❌ Не удалось создать счет для оплаты криптовалютой.\n\n<pre>Ошибка: {e}</pre>")
+            error_msg = str(e)
+            await callback.message.edit_text(
+                f"❌ Не удалось создать счет для оплаты криптовалютой.\n\n"
+                f"<pre>Ошибка: {error_msg}</pre>\n\n"
+                f"Попробуйте использовать другой способ оплаты."
+            )
             await state.clear()
+        finally:
+            # Закрываем сессию CryptoPay в любом случае
+            if crypto:
+                try:
+                    await crypto.close()
+                except Exception as e:
+                    logger.warning(f"Error closing CryptoPay session: {e}")
         
     @user_router.callback_query(PaymentProcess.waiting_for_payment_method, F.data == "pay_heleket")
     async def create_heleket_invoice_handler(callback: types.CallbackQuery, state: FSMContext):
@@ -1483,42 +1502,74 @@ def _generate_heleket_signature(data, api_key: str) -> str:
     return hashlib.md5(raw_string.encode()).hexdigest()
 
 async def get_usdt_rub_rate() -> Decimal | None:
+    """Получает курс USDT/RUB из Binance API с fallback на настройки из базы данных"""
     url = "https://api.binance.com/api/v3/ticker/price"
     params = {"symbol": "USDTRUB"}
     
     try:
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(url, params=params) as response:
                 response.raise_for_status()
                 data = await response.json()
                 price_str = data.get('price')
                 if price_str:
-                    logger.info(f"Got USDT RUB: {price_str}")
-                    return Decimal(price_str)
+                    rate = Decimal(price_str)
+                    logger.info(f"Got USDT RUB from Binance: {rate}")
+                    return rate
                 logger.error("Can't find 'price' in Binance response.")
-                return None
+    except asyncio.TimeoutError:
+        logger.warning("Timeout while fetching USDT/RUB rate from Binance")
     except Exception as e:
         logger.error(f"Error getting USDT RUB Binance rate: {e}", exc_info=True)
-        return None
+    
+    # Fallback: пытаемся получить курс из настроек
+    try:
+        fallback_rate = get_setting("usdt_rub_rate")
+        if fallback_rate:
+            rate = Decimal(fallback_rate)
+            logger.info(f"Using fallback USDT RUB rate from settings: {rate}")
+            return rate
+    except Exception as e:
+        logger.warning(f"Failed to get fallback USDT RUB rate: {e}")
+    
+    logger.error("Failed to get USDT/RUB rate from both Binance and settings")
+    return None
     
 async def get_ton_usdt_rate() -> Decimal | None:
+    """Получает курс TON/USDT из Binance API с fallback на настройки из базы данных"""
     url = "https://api.binance.com/api/v3/ticker/price"
     params = {"symbol": "TONUSDT"}
     
     try:
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(url, params=params) as response:
                 response.raise_for_status()
                 data = await response.json()
                 price_str = data.get('price')
                 if price_str:
-                    logger.info(f"Got TON USDT: {price_str}")
-                    return Decimal(price_str)
+                    rate = Decimal(price_str)
+                    logger.info(f"Got TON USDT from Binance: {rate}")
+                    return rate
                 logger.error("Can't find 'price' in Binance response.")
-                return None
+    except asyncio.TimeoutError:
+        logger.warning("Timeout while fetching TON/USDT rate from Binance")
     except Exception as e:
         logger.error(f"Error getting TON USDT Binance rate: {e}", exc_info=True)
-        return None
+    
+    # Fallback: пытаемся получить курс из настроек
+    try:
+        fallback_rate = get_setting("ton_usdt_rate")
+        if fallback_rate:
+            rate = Decimal(fallback_rate)
+            logger.info(f"Using fallback TON USDT rate from settings: {rate}")
+            return rate
+    except Exception as e:
+        logger.warning(f"Failed to get fallback TON USDT rate: {e}")
+    
+    logger.error("Failed to get TON/USDT rate from both Binance and settings")
+    return None
 
 async def process_successful_payment(bot: Bot, metadata: dict):
     try:
