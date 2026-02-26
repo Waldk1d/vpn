@@ -643,7 +643,7 @@ def get_user_router() -> Router:
                 continue
             
             # Проверяем, что это похоже на subscription URL
-            if not line.startswith('http') or '/LQIgchIFIj/' not in line:
+            if not line.startswith('http') or '/akRwUv1ZZ1/' not in line:
                 invalid_count += 1
                 continue
             
