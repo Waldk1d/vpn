@@ -153,10 +153,17 @@ def initialize_db():
                     expiry_date TIMESTAMP,
                     created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     assigned_date TIMESTAMP,
+                    tariff_label TEXT,
                     FOREIGN KEY (user_id) REFERENCES users (telegram_id),
                     FOREIGN KEY (key_id) REFERENCES vpn_keys (key_id)
                 )
-            ''')            
+            ''')
+            # Добавляем поле tariff_label, если базы уже существует без него
+            try:
+                cursor.execute("ALTER TABLE subscription_links ADD COLUMN tariff_label TEXT")
+            except sqlite3.OperationalError:
+                # Колонка уже существует
+                pass
             default_settings = {
                 "panel_login": "admin",
                 "panel_password": "admin",
@@ -695,7 +702,7 @@ def set_trial_used(telegram_id: int):
     except sqlite3.Error as e:
         logging.error(f"Failed to set trial used for user {telegram_id}: {e}")
 
-def add_new_key(user_id: int, host_name: str, xui_client_uuid: str, key_email: str, expiry_timestamp_ms: int, subscription_url: str = None):
+def add_new_key(user_id: int, host_name: str, xui_client_uuid: str, key_email: str, expiry_timestamp_ms: int, subscription_url: str = None, tariff_label: str | None = None):
     try:
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
@@ -709,8 +716,8 @@ def add_new_key(user_id: int, host_name: str, xui_client_uuid: str, key_email: s
             # Если передан subscription_url, привязываем его к ключу
             if subscription_url:
                 cursor.execute(
-                    "UPDATE subscription_links SET status = 'assigned', user_id = ?, key_id = ?, expiry_date = ?, assigned_date = CURRENT_TIMESTAMP WHERE subscription_url = ?",
-                    (user_id, new_key_id, expiry_date, subscription_url)
+                    "UPDATE subscription_links SET status = 'assigned', user_id = ?, key_id = ?, expiry_date = ?, assigned_date = CURRENT_TIMESTAMP, tariff_label = ? WHERE subscription_url = ?",
+                    (user_id, new_key_id, expiry_date, tariff_label, subscription_url)
                 )
             
             conn.commit()

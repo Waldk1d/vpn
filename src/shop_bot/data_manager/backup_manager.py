@@ -172,8 +172,8 @@ def restore_from_backup(backup_data: Dict[str, Any]) -> bool:
                 for link in backup_data['subscription_links']:
                     cursor.execute("""
                         INSERT OR REPLACE INTO subscription_links 
-                        (link_id, subscription_url, status, user_id, key_id, expiry_date, created_date, assigned_date)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        (link_id, subscription_url, status, user_id, key_id, expiry_date, created_date, assigned_date, tariff_label)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         link.get('link_id'),
                         link.get('subscription_url'),
@@ -182,7 +182,8 @@ def restore_from_backup(backup_data: Dict[str, Any]) -> bool:
                         link.get('key_id'),
                         link.get('expiry_date'),
                         link.get('created_date'),
-                        link.get('assigned_date')
+                        link.get('assigned_date'),
+                        link.get('tariff_label')
                     ))
             
             # Восстанавливаем транзакции

@@ -21,7 +21,8 @@ from shop_bot.data_manager.database import (
     get_total_keys_count, get_total_spent_sum, get_daily_stats_for_charts,
     get_recent_transactions, get_paginated_transactions, get_all_users, get_user_keys,
     ban_user, unban_user, delete_user_keys, get_setting, find_and_complete_ton_transaction,
-    update_host_subscription_token, get_free_subscription_count, get_all_subscription_links
+    update_host_subscription_token, get_free_subscription_count, get_all_subscription_links,
+    get_user
 )
 from shop_bot.data_manager.backup_manager import save_backup_to_file, restore_from_backup, load_backup_from_file
 
@@ -147,6 +148,31 @@ def create_webhook_app(bot_controller_instance):
         common_data = get_common_template_data()
         return render_template('users.html', users=users, **common_data)
 
+    @flask_app.route('/subscription-links')
+    @login_required
+    def subscription_links_page():
+        """Отдельная страница для просмотра всех Subscription ссылок"""
+        free_subscription_count = get_free_subscription_count()
+        all_subscription_links = get_all_subscription_links()
+        assigned_count = sum(1 for link in all_subscription_links if link.get('status') == 'assigned')
+
+        # Обогащаем данными о пользователе (username) для занятых ссылок
+        for link in all_subscription_links:
+            user_id = link.get('user_id')
+            if user_id:
+                user = get_user(user_id)
+                link['username'] = user.get('username') if user else None
+
+        common_data = get_common_template_data()
+        return render_template(
+            'subscription_links.html',
+            free_subscription_count=free_subscription_count,
+            total_subscription_count=len(all_subscription_links),
+            assigned_subscription_count=assigned_count,
+            subscription_links=all_subscription_links,
+            **common_data
+        )
+
     @flask_app.route('/settings', methods=['GET', 'POST'])
     @login_required
     def settings_page():
@@ -179,6 +205,13 @@ def create_webhook_app(bot_controller_instance):
         free_subscription_count = get_free_subscription_count()
         all_subscription_links = get_all_subscription_links()
         assigned_count = sum(1 for link in all_subscription_links if link.get('status') == 'assigned')
+
+        # Обогащаем ссылку username пользователя для отображения в настройках
+        for link in all_subscription_links:
+            user_id = link.get('user_id')
+            if user_id:
+                user = get_user(user_id)
+                link['username'] = user.get('username') if user else None
         
         common_data = get_common_template_data()
         return render_template('settings.html', 

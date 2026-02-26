@@ -223,23 +223,28 @@
 				<p><strong>Всего ссылок:</strong> {{ total_subscription_count or 0 }}</p>
 				<p><strong>Свободных:</strong> {{ free_subscription_count or 0 }}</p>
 				<p><strong>Занятых:</strong> {{ assigned_subscription_count or 0 }}</p>
+				<p style="margin-top: 10px;">
+					Для удобного просмотра всех ссылок перейдите во вкладку
+					<a href="{{ url_for('subscription_links_page') }}">"Subscription ссылки"</a> в верхнем меню.
+				</p>
 			</div>
 			
 			{% if subscription_links %}
 			<div class="host-card">
-				<h4>Список ссылок</h4>
-				<div style="max-height: 400px; overflow-y: auto;">
+				<h4>Последние ссылки</h4>
+				<div style="max-height: 300px; overflow-y: auto;">
 					<table style="width: 100%; border-collapse: collapse;">
 						<thead>
 							<tr style="background: #f5f5f5;">
 								<th style="padding: 8px; text-align: left; border: 1px solid #ddd;">URL</th>
 								<th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Статус</th>
 								<th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Пользователь</th>
+								<th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Тариф</th>
 								<th style="padding: 8px; text-align: left; border: 1px solid #ddd;">До</th>
 							</tr>
 						</thead>
 						<tbody>
-							{% for link in subscription_links %}
+							{% for link in subscription_links[:10] %}
 							<tr>
 								<td style="padding: 8px; border: 1px solid #ddd; word-break: break-all;">
 									<code style="font-size: 0.85em;">{{ link.subscription_url }}</code>
@@ -253,7 +258,17 @@
 								</td>
 								<td style="padding: 8px; border: 1px solid #ddd;">
 									{% if link.user_id %}
-										{{ link.user_id }}
+										ID: {{ link.user_id }}
+										{% if link.username %}
+											<br /><span style="color: #555;">@{{ link.username }}</span>
+										{% endif %}
+									{% else %}
+										-
+									{% endif %}
+								</td>
+								<td style="padding: 8px; border: 1px solid #ddd;">
+									{% if link.tariff_label %}
+										{{ link.tariff_label }}
 									{% else %}
 										-
 									{% endif %}

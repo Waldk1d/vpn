@@ -798,7 +798,8 @@ def get_user_router() -> Router:
                 xui_client_uuid=fake_uuid,
                 key_email=email,
                 expiry_timestamp_ms=int(expiry_date.timestamp() * 1000),
-                subscription_url=subscription_url
+                subscription_url=subscription_url,
+                tariff_label=f"Пробный ({days_to_add} дн.)"
             )
             
             if not new_key_id:
@@ -1695,6 +1696,19 @@ async def process_successful_payment(bot: Bot, metadata: dict):
         customer_email = metadata.get('customer_email')
         payment_method = metadata.get('payment_method', 'Unknown')
 
+        # Определяем человекочитаемое название тарифа
+        tariff_label = None
+        if months > 0:
+            plan_name = None
+            if plan_id:
+                plan = get_plan_by_id(plan_id)
+                if plan:
+                    plan_name = plan.get('plan_name')
+            if plan_name:
+                tariff_label = f"{plan_name} ({months} мес.)"
+            else:
+                tariff_label = f"{months} мес."
+
         chat_id_to_delete = metadata.get('chat_id')
         message_id_to_delete = metadata.get('message_id')
         
@@ -1745,13 +1759,21 @@ async def process_successful_payment(bot: Bot, metadata: dict):
             # Генерируем фиктивный UUID для совместимости
             fake_uuid = str(uuid.uuid4())
             host_for_key = host_name if host_name else "default"
-            new_key_id = add_new_key(user_id, host_for_key, fake_uuid, email, int(expiry_date.timestamp() * 1000), subscription_url)
+            new_key_id = add_new_key(
+                user_id=user_id,
+                host_name=host_for_key,
+                xui_client_uuid=fake_uuid,
+                key_email=email,
+                expiry_timestamp_ms=int(expiry_date.timestamp() * 1000),
+                subscription_url=subscription_url,
+                tariff_label=tariff_label
+            )
             
             if not new_key_id:
                 await processing_message.edit_text("❌ Не удалось создать ключ.")
                 return
             
-            # Явно привязываем subscription ссылку к ключу (для надежности)
+            # Явно привязываем subscription ссылку к ключу (для надежности, дата и статус уже выставлены)
             assign_subscription_link(subscription_url, user_id, new_key_id, expiry_date)
             
             result = {

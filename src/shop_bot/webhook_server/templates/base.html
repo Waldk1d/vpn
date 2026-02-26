@@ -29,6 +29,11 @@
 						class="nav-link {% if request.endpoint == 'settings_page' %}active{% endif %}"
 						>Настройки</a
 					>
+					<a
+						href="{{ url_for('subscription_links_page') }}"
+						class="nav-link {% if request.endpoint == 'subscription_links_page' %}active{% endif %}"
+						>Subscription ссылки</a
+					>
 				</nav>
 
 				<div class="header-controls">

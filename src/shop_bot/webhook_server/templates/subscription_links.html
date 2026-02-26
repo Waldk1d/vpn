@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Subscription ссылки{% endblock %}
+{% block content %}
+
+<h1>Subscription ссылки</h1>
+
+<section class="settings-section">
+	<div class="host-card">
+		<h4>Статистика</h4>
+		<p><strong>Всего ссылок:</strong> {{ total_subscription_count or 0 }}</p>
+		<p><strong>Свободных:</strong> {{ free_subscription_count or 0 }}</p>
+		<p><strong>Занятых:</strong> {{ assigned_subscription_count or 0 }}</p>
+	</div>
+</section>
+
+<section class="settings-section">
+	{% if subscription_links %}
+	<div class="host-card">
+		<h4>Список ссылок</h4>
+		<div style="max-height: 600px; overflow-y: auto;">
+			<table style="width: 100%; border-collapse: collapse;">
+				<thead>
+					<tr style="background: #f5f5f5;">
+						<th style="padding: 8px; text-align: left; border: 1px solid #ddd;">URL</th>
+						<th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Статус</th>
+						<th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Пользователь</th>
+						<th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Тариф</th>
+						<th style="padding: 8px; text-align: left; border: 1px solid #ddd;">До</th>
+					</tr>
+				</thead>
+				<tbody>
+					{% for link in subscription_links %}
+					<tr>
+						<td style="padding: 8px; border: 1px solid #ddd; word-break: break-all;">
+							<code style="font-size: 0.85em;">{{ link.subscription_url }}</code>
+						</td>
+						<td style="padding: 8px; border: 1px solid #ddd;">
+							{% if link.status == 'free' %}
+								<span style="color: green;">✅ Свободна</span>
+							{% else %}
+								<span style="color: orange;">🔒 Занята</span>
+							{% endif %}
+						</td>
+						<td style="padding: 8px; border: 1px solid #ddd;">
+							{% if link.user_id %}
+								ID: {{ link.user_id }}
+								{% if link.username %}
+									<br /><span style="color: #555;">@{{ link.username }}</span>
+								{% endif %}
+							{% else %}
+								-
+							{% endif %}
+						</td>
+						<td style="padding: 8px; border: 1px solid #ddd;">
+							{% if link.tariff_label %}
+								{{ link.tariff_label }}
+							{% else %}
+								-
+							{% endif %}
+						</td>
+						<td style="padding: 8px; border: 1px solid #ddd;">
+							{% if link.expiry_date %}
+								{{ link.expiry_date[:10] }}
+							{% else %}
+								-
+							{% endif %}
+						</td>
+					</tr>
+					{% endfor %}
+				</tbody>
+			</table>
+		</div>
+	</div>
+	{% else %}
+	<div class="host-card">
+		<p>Subscription ссылки еще не добавлены.</p>
+		<p style="color: #666; font-size: 0.9em;">
+			Используйте команду <code>/add_subscription</code> в боте для добавления ссылок.
+		</p>
+	</div>
+	{% endif %}
+</section>
+
+{% endblock %}
+
