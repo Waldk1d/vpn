@@ -26,10 +26,21 @@ def create_main_menu_keyboard(user_keys: list, trial_available: bool, is_admin: 
     builder.button(text="🆘 Поддержка", callback_data="show_help")
     builder.button(text="ℹ️ О проекте", callback_data="show_about")
     builder.button(text="❓ Как использовать", callback_data="howto_vless")
+    # Кнопка-ссылка для покупки Stars из главного меню
+    builder.button(text="Купить Stars⭐", url="https://t.me/morozovaestars_bot")
     if is_admin:
         builder.button(text="📢 Рассылка", callback_data="start_broadcast")
 
-    layout = [1 if trial_available and get_setting("trial_enabled") == "true" else 0, 2, 1, 2, 1, 1 if is_admin else 0]
+    # Последовательность рядов: [пробник], профиль+ключи, поддержка+о проекте,
+    # как использовать, купить Stars, [кнопка админа]
+    layout = [
+        1 if trial_available and get_setting("trial_enabled") == "true" else 0,
+        2,
+        2,
+        1,
+        1,
+        1 if is_admin else 0
+    ]
     actual_layout = [size for size in layout if size > 0]
     builder.adjust(*actual_layout)
     
@@ -124,8 +135,11 @@ def create_payment_method_keyboard(payment_methods: dict, action: str, key_id: i
         logger.warning(f"TON Connect not enabled. payment_methods: {payment_methods}, tonconnect value: {payment_methods.get('tonconnect') if payment_methods else 'None'}")
     if payment_methods and payment_methods.get("stars"):
         builder.button(text="⭐ Telegram Stars", callback_data="pay_stars")
+        # Кнопка-ссылка для покупки Stars у вашего бота
+        builder.button(text="Купить Stars⭐", url="https://t.me/morozovaestars_bot")
 
     builder.button(text="⬅️ Назад", callback_data="back_to_email_prompt")
+    # Делаем разбиение по строкам: каждый способ/ссылка на своей строке
     builder.adjust(1)
     return builder.as_markup()
 
