@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 # Определяем корень проекта (либо /app/project для Docker, либо текущая директория)
 if os.path.exists("/app/project"):
-PROJECT_ROOT = Path("/app/project")
+    PROJECT_ROOT = Path("/app/project")
 else:
     # Для локальной разработки - поднимаемся на 2 уровня вверх от database.py
     PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
