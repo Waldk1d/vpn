@@ -118,15 +118,16 @@ def initialize_db():
                     cursor.execute("SELECT * FROM plans")
                     old_data = cursor.fetchall()
                     cursor.execute("DROP TABLE plans")
-            cursor.execute('''
+
+                    cursor.execute('''
                         CREATE TABLE plans (
-                    plan_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            plan_id INTEGER PRIMARY KEY AUTOINCREMENT,
                             host_name TEXT,
-                    plan_name TEXT NOT NULL,
-                    months INTEGER NOT NULL,
+                            plan_name TEXT NOT NULL,
+                            months INTEGER NOT NULL,
                             price REAL NOT NULL
-                )
-            ''')            
+                        )
+                    ''')
                     # Восстанавливаем данные
                     for row in old_data:
                         cursor.execute(
@@ -432,7 +433,7 @@ def create_plan(host_name: str | None, plan_name: str, months: int, price: float
             )
             conn.commit()
             if host_name:
-            logging.info(f"Created new plan '{plan_name}' for host '{host_name}'.")
+                logging.info(f"Created new plan '{plan_name}' for host '{host_name}'.")
             else:
                 logging.info(f"Created new plan '{plan_name}' (without host).")
     except sqlite3.Error as e:
@@ -445,7 +446,7 @@ def get_plans_for_host(host_name: str | None = None) -> list[dict]:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             if host_name:
-            cursor.execute("SELECT * FROM plans WHERE host_name = ? ORDER BY months", (host_name,))
+                cursor.execute("SELECT * FROM plans WHERE host_name = ? ORDER BY months", (host_name,))
             else:
                 # Получаем все тарифы без привязки к хосту (host_name IS NULL)
                 cursor.execute("SELECT * FROM plans WHERE host_name IS NULL ORDER BY months")
