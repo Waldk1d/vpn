@@ -1429,44 +1429,60 @@ def get_user_router() -> Router:
     async def pay_stars_handler(callback: types.CallbackQuery, state: FSMContext):
         """
         Обработчик выбора оплаты через Telegram Stars.
-        Показывает пользовательскую инструкцию и клавиатуру с кнопками
-        «Оплатить» (подтвердить отправку Stars) и «Купить звезды».
+        Создаёт фиксированный инвойс в XTR (Stars) для выбранного тарифа.
+        После успешной оплаты Telegram сам пришлёт successful_payment,
+        который мы обработаем и автоматически выдадим/продлим подписку.
         """
         await callback.answer()
 
         data = await state.get_data()
         plan = get_plan_by_id(data.get("plan_id"))
-        user_data = get_user(callback.from_user.id)
 
         if not plan:
             await callback.message.edit_text("❌ Произошла ошибка при выборе тарифа.")
             await state.clear()
             return
 
+        user_id = callback.from_user.id
+        user_data = get_user(user_id)
+
+        # Берём финальную цену (с учётом возможной реферальной скидки),
+        # если она была посчитана ранее, иначе — цену тарифа.
         price_rub = Decimal(str(data.get("final_price", plan["price"])))
 
-        text_parts = [
-            "⭐ <b>Оплата через Telegram Stars</b>\n",
-            "1️⃣ Купите нужное количество Stars по кнопке ниже или любым другим способом.\n",
-            "2️⃣ Переведите Stars на аккаунт администратора (посмотрите актуальные реквизиты в описании бота/канала).\n",
-            "3️⃣ После отправки Stars нажмите кнопку <b>«Оплатить»</b>, чтобы администратор получил заявку.\n",
-            "",
-            f"Тариф: <b>{plan.get('plan_name', f'{plan['months']} мес.')}</b>\n",
-            f"Стоимость: <b>{price_rub:.2f} RUB</b> (эквивалент в Stars администратор рассчитает вручную)."
+        # Фиксированное количество звёзд: по умолчанию 1 ⭐ = 1 RUB
+        # (при необходимости можно заменить на свою формулу конвертации).
+        amount_stars = int(price_rub)
+        if amount_stars <= 0:
+            amount_stars = 1
+
+        default_plan_name = f"{plan['months']} мес."
+        plan_name = plan.get("plan_name") or default_plan_name
+
+        prices = [types.LabeledPrice(label=plan_name, amount=amount_stars)]
+
+        # Кодируем все нужные данные в payload, чтобы потом в successful_payment
+        # полностью восстановить metadata и вызвать process_successful_payment.
+        payload_parts = [
+            "stars",
+            str(user_id),
+            str(plan["plan_id"]),
+            str(plan["months"]),
+            str(float(price_rub)),
+            data.get("action") or "new",
+            str(data.get("key_id") or 0),
+            (data.get("host_name") or "none") or "none",
+            data.get("customer_email") or "",
         ]
+        payload = ":".join(payload_parts)
 
-        # Если пользователь пришел по реферальной ссылке и это первая покупка,
-        # даем понять, что цена уже со скидкой (если она применена выше).
-        if user_data.get("referred_by") and user_data.get("total_spent", 0) == 0:
-            discount_percentage_str = get_setting("referral_discount") or "0"
-            if Decimal(discount_percentage_str) > 0:
-                text_parts.append(
-                    f"\n🎁 В эту стоимость может быть включена ваша реферальная скидка {discount_percentage_str}%."
-                )
-
-        await callback.message.edit_text(
-            "\n".join(text_parts),
-            reply_markup=keyboards.create_stars_payment_keyboard()
+        await callback.message.answer_invoice(
+            title=f"Подписка: {plan_name}",
+            description="Оплата VPN-подписки через Telegram Stars",
+            payload=payload,
+            provider_token="",  # для Telegram Stars провайдер не нужен
+            currency="XTR",
+            prices=prices
         )
 
     @user_router.callback_query(PaymentProcess.waiting_for_payment_method, F.data == "back_to_payment_methods")
@@ -1482,53 +1498,80 @@ def get_user_router() -> Router:
     @registration_required
     async def confirm_stars_payment_handler(callback: types.CallbackQuery, state: FSMContext):
         """
-        Пользователь нажал «Оплатить» в разделе Telegram Stars.
-        Считаем оплату успешной и запускаем общий процесс выдачи/продления ключа,
-        как для YooKassa / CryptoBot / Heleket / TON.
+        Устаревший обработчик для Stars (кнопка «Оплатить» в кастомной клавиатуре).
+        Сейчас для Telegram Stars используется нативная оплата через send_invoice,
+        поэтому этот колбэк просто подсказывает пользователю, что нужно
+        оплатить счёт Stars, а не нажимать старую кнопку.
         """
-        await callback.answer("Обрабатываю оплату через Telegram Stars...")
-
-        data = await state.get_data()
-        plan_id = data.get("plan_id")
-        action = data.get("action")
-        key_id = data.get("key_id")
-
-        plan = get_plan_by_id(plan_id)
-        user_id = callback.from_user.id
-        user_data = get_user(user_id)
-
-        if not plan or not user_data:
-            await callback.message.edit_text("❌ Не удалось обработать оплату через Stars.")
-            await state.clear()
-            return
-
-        price_rub = Decimal(str(data.get("final_price", plan["price"])))
-
-        # Собираем metadata в том же формате, что и для других способов оплаты
-        metadata = {
-            "user_id": user_id,
-            "months": plan["months"],
-            "price": float(price_rub),
-            "action": action,
-            "key_id": key_id or 0,
-            "host_name": data.get("host_name"),
-            "plan_id": plan_id,
-            "customer_email": data.get("customer_email"),
-            "payment_method": "Telegram Stars",
-        }
-
-        # Сообщаем пользователю, что сейчас будет выдан/продлен ключ
+        await callback.answer()
         await callback.message.edit_text(
-            "✅ Оплата через Telegram Stars принята.\n"
-            "⏳ Выдаю/продлеваю вам ключ, это займет несколько секунд..."
+            "Для оплаты через Telegram Stars теперь используется встроенный счёт.\n"
+            "Пожалуйста, выберите способ оплаты Stars ещё раз и оплатите появившийся invoice.",
+            reply_markup=keyboards.create_back_to_menu_keyboard()
         )
 
-        # Используем общий обработчик успешной оплаты,
-        # который сам возьмет свободную subscription-ссылку,
-        # отметит ее занятой и привяжет к пользователю/ключу.
-        await process_successful_payment(callback.bot, metadata)
+    @user_router.pre_checkout_query()
+    async def stars_pre_checkout_handler(pre_checkout_query: types.PreCheckoutQuery):
+        """
+        Обработка pre_checkout для платежей Telegram Stars.
+        Разрешаем все платежи, саму проверку и выдачу подписки делаем
+        позже в successful_payment через process_successful_payment.
+        """
+        await pre_checkout_query.answer(ok=True)
 
-        await state.clear()
+    @user_router.message(F.successful_payment)
+    @registration_required
+    async def stars_successful_payment_handler(message: types.Message):
+        """
+        Обработчик успешной оплаты через Telegram Stars.
+        Парсим payload, собираем metadata и передаём в process_successful_payment,
+        который уже умеет выдавать/продлевать подписку и отмечать ссылку занятой.
+        """
+        sp = message.successful_payment
+
+        # Нас интересуют только платежи Stars (XTR) и наш payload
+        if not sp or sp.currency != "XTR":
+            return
+
+        payload = sp.invoice_payload or ""
+        if not payload.startswith("stars:"):
+            return
+
+        parts = payload.split(":")
+        # Ожидаемый формат:
+        # stars:user_id:plan_id:months:price:action:key_id:host_name:customer_email
+        if len(parts) < 9:
+            logger.error(f"Telegram Stars: invalid payload format: {payload}")
+            return
+
+        try:
+            _, user_id_str, plan_id_str, months_str, price_str, action, key_id_str, host_name_str, customer_email = parts
+
+            user_id = int(user_id_str)
+            months = int(months_str)
+            price = float(price_str)
+            key_id = int(key_id_str) if key_id_str else 0
+            host_name = None if host_name_str in ("none", "") else host_name_str
+            plan_id = int(plan_id_str) if plan_id_str else 0
+
+            metadata = {
+                "user_id": user_id,
+                "months": months,
+                "price": price,
+                "action": action,
+                "key_id": key_id,
+                "host_name": host_name,
+                "plan_id": plan_id,
+                "customer_email": customer_email or None,
+                "payment_method": "Telegram Stars",
+                # Для возможного удаления сообщения с инвойсом (если нужно)
+                "chat_id": message.chat.id,
+                "message_id": message.message_id,
+            }
+
+            await process_successful_payment(message.bot, metadata)
+        except Exception as e:
+            logger.error(f"Telegram Stars: failed to process successful payment: {e}", exc_info=True)
 
     @user_router.message(F.text)
     @registration_required
