@@ -47,7 +47,7 @@ def main():
         flask_thread.start()
         
         logger.info("Flask server started in a background thread on http://0.0.0.0:1488")
-        
+            
         # Автозапуск основного бота при старте приложения
         logger.info("Application is running. Attempting to auto-start Shop Bot...")
         start_result = bot_controller.start_shop_bot()

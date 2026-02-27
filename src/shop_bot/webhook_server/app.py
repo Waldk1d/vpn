@@ -408,7 +408,7 @@ def create_webhook_app(bot_controller_instance):
                 # Обрабатываем key_id: для новых ключей может быть 0 или "0"
                 key_id_str = parts[4] if len(parts) > 4 else "0"
                 key_id = int(key_id_str) if key_id_str and key_id_str != 'none' else 0
-                
+
                 metadata = {
                     "user_id": parts[0],
                     "months": parts[1],
