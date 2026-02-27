@@ -109,7 +109,8 @@ class BotController:
                 "yookassa": yookassa_enabled,
                 "heleket": heleket_enabled,
                 "cryptobot": cryptobot_enabled,
-                "tonconnect": tonconnect_enabled
+                "tonconnect": tonconnect_enabled,
+                "stars": True  # Stars всегда доступен, это встроенная функция Telegram
             }
             handlers.TELEGRAM_BOT_USERNAME = bot_username
             handlers.ADMIN_ID = admin_id

@@ -122,6 +122,8 @@ def create_payment_method_keyboard(payment_methods: dict, action: str, key_id: i
         builder.button(text="🪙 TON Connect", callback_data=callback_data_ton)
     else:
         logger.warning(f"TON Connect not enabled. payment_methods: {payment_methods}, tonconnect value: {payment_methods.get('tonconnect') if payment_methods else 'None'}")
+    if payment_methods and payment_methods.get("stars"):
+        builder.button(text="⭐ Telegram Stars", callback_data="pay_stars")
 
     builder.button(text="⬅️ Назад", callback_data="back_to_email_prompt")
     builder.adjust(1)
@@ -130,6 +132,15 @@ def create_payment_method_keyboard(payment_methods: dict, action: str, key_id: i
 def create_ton_connect_keyboard(connect_url: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="🚀 Открыть кошелек", url=connect_url)
+    return builder.as_markup()
+
+def create_stars_payment_keyboard() -> InlineKeyboardMarkup:
+    """Создает клавиатуру для оплаты через Stars с кнопкой покупки звезд"""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💳 Оплатить", callback_data="confirm_stars_payment")
+    builder.button(text="⭐ Купить звезды", url="https://t.me/morozovaestars_bot")
+    builder.button(text="⬅️ Назад", callback_data="back_to_payment_methods")
+    builder.adjust(1, 1, 1)
     return builder.as_markup()
 
 def create_payment_keyboard(payment_url: str) -> InlineKeyboardMarkup:

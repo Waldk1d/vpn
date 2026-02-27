@@ -18,14 +18,23 @@
 	<div class="host-card">
 		<h4>Список ссылок</h4>
 		<div style="max-height: 600px; overflow-y: auto;">
-			<table style="width: 100%; border-collapse: collapse;">
+			<table id="subscription-links-table" style="width: 100%; border-collapse: collapse;">
 				<thead>
 					<tr style="background: #2c3e50; color: #ffffff;">
 						<th style="padding: 12px; text-align: left; border: 1px solid #34495e; font-weight: bold;">URL</th>
 						<th style="padding: 12px; text-align: left; border: 1px solid #34495e; font-weight: bold;">Статус</th>
 						<th style="padding: 12px; text-align: left; border: 1px solid #34495e; font-weight: bold;">Пользователь</th>
 						<th style="padding: 12px; text-align: left; border: 1px solid #34495e; font-weight: bold;">Тариф</th>
-						<th style="padding: 12px; text-align: left; border: 1px solid #34495e; font-weight: bold;">До</th>
+						<th style="padding: 12px; text-align: left; border: 1px solid #34495e; font-weight: bold;">
+							<button type="button" class="table-sort-button" data-sort-key="start_date" style="background: transparent; border: none; color: inherit; cursor: pointer; padding: 0; font: inherit;">
+								Начало
+							</button>
+						</th>
+						<th style="padding: 12px; text-align: left; border: 1px solid #34495e; font-weight: bold;">
+							<button type="button" class="table-sort-button" data-sort-key="expiry_date" style="background: transparent; border: none; color: inherit; cursor: pointer; padding: 0; font: inherit;">
+								До
+							</button>
+						</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -58,7 +67,14 @@
 								-
 							{% endif %}
 						</td>
-						<td style="padding: 8px; border: 1px solid #ddd;">
+						<td style="padding: 8px; border: 1px solid #ddd;" data-sort-key="start_date" data-sort-value="{{ link.assigned_date or '' }}">
+							{% if link.assigned_date %}
+								{{ link.assigned_date[:10] }}
+							{% else %}
+								-
+							{% endif %}
+						</td>
+						<td style="padding: 8px; border: 1px solid #ddd;" data-sort-key="expiry_date" data-sort-value="{{ link.expiry_date or '' }}">
 							{% if link.expiry_date %}
 								{{ link.expiry_date[:10] }}
 							{% else %}
@@ -80,6 +96,53 @@
 	</div>
 	{% endif %}
 </section>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+	const table = document.getElementById('subscription-links-table');
+	if (!table) return;
+
+	const buttons = table.querySelectorAll('.table-sort-button');
+	buttons.forEach((btn) => {
+		btn.addEventListener('click', function () {
+			const sortKey = this.dataset.sortKey;
+			if (!sortKey) return;
+
+			const tbody = table.tBodies[0];
+			if (!tbody) return;
+
+			const rows = Array.from(tbody.querySelectorAll('tr'));
+			if (!rows.length) return;
+
+			const currentOrder = this.dataset.sortOrder || 'desc';
+			const newOrder = currentOrder === 'desc' ? 'asc' : 'desc';
+			this.dataset.sortOrder = newOrder;
+
+			rows.sort((a, b) => {
+				const aCell = a.querySelector('td[data-sort-key=\"' + sortKey + '\"]');
+				const bCell = b.querySelector('td[data-sort-key=\"' + sortKey + '\"]');
+
+				const aVal = aCell ? (aCell.dataset.sortValue || '') : '';
+				const bVal = bCell ? (bCell.dataset.sortValue || '') : '';
+
+				// Пустые значения всегда внизу
+				if (!aVal && !bVal) return 0;
+				if (!aVal) return 1;
+				if (!bVal) return -1;
+
+				// Даты в ISO-формате можно сравнивать как строки
+				if (newOrder === 'asc') {
+					return aVal.localeCompare(bVal);
+				} else {
+					return bVal.localeCompare(aVal);
+				}
+			});
+
+			rows.forEach((row) => tbody.appendChild(row));
+		});
+	});
+});
+</script>
 
 {% endblock %}
 
